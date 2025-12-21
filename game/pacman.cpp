@@ -8,8 +8,10 @@
 #include "game/config.h"
 #include "game/game.h"
 
-// caméra globale définie dans game.cpp
 extern float g_camera_y;
+
+// Déclaration de la fonction dans game.cpp
+void game_trigger_frightened(GameState& g);
 
 int Pacman::dirX() const {
     switch (dir) {
@@ -30,6 +32,108 @@ int Pacman::dirY() const {
     }
 }
 
+// Tunnel wrap T->E côté Pac-Man
+static bool pacman_try_tunnel_wrap(GameState& g, Pacman& p, int& nextX, int& nextY)
+{
+    int row = p.y / TILE_SIZE;
+    int col = p.x / TILE_SIZE;
+
+    int dr = p.dirY();
+    int dc = p.dirX();
+
+    int curr_row = row;
+    int curr_col = col;
+    int next_row = row + dr;
+    int next_col = col + dc;
+
+    if (curr_row < 0 || curr_row >= MAZE_HEIGHT ||
+        curr_col < 0 || curr_col >= MAZE_WIDTH ||
+        next_row < 0 || next_row >= MAZE_HEIGHT ||
+        next_col < 0 || next_col >= MAZE_WIDTH)
+        return false;
+
+    TileType curr_t = g.maze.tiles[curr_row][curr_col];
+    TileType next_t = g.maze.tiles[next_row][next_col];
+
+    // Pac-Man doit être CENTRÉ dans la case E
+    if (!p.isCentered())
+        return false;
+
+    // Condition pacman va de E vers T 
+    if (!(curr_t == TileType::TunnelEntry && next_t == TileType::Tunnel))
+        return false;
+
+    // Pac-Man doit se diriger vers T
+    if (dr == 0 && dc == 0)
+        return false;
+
+    // On cherche les deux T
+    int t0r = -1, t0c = -1;
+    int t1r = -1, t1c = -1;
+    int countT = 0;
+
+    for (int r = 0; r < MAZE_HEIGHT; r++)
+    for (int c = 0; c < MAZE_WIDTH; c++)
+    {
+        if (g.maze.tiles[r][c] == TileType::Tunnel)
+        {
+            if (countT == 0) { t0r = r; t0c = c; }
+            else if (countT == 1) { t1r = r; t1c = c; }
+            countT++;
+        }
+    }
+
+    if (countT != 2)
+        return false;
+
+    int dest_r, dest_c;
+
+    // Déterminer l'autre T
+    if (next_row == t0r && next_col == t0c)
+    {
+        dest_r = t1r;
+        dest_c = t1c;
+    }
+    else
+    {
+        dest_r = t0r;
+        dest_c = t0c;
+    }
+
+    // Positionner Pac-Man sur l'autre T
+    p.x = dest_c * TILE_SIZE + PACMAN_OFFSET;
+    p.y = dest_r * TILE_SIZE + PACMAN_OFFSET;
+
+    // Trouver l'E adjacent pour la sortie
+    const int dr2[4] = {-1, +1, 0, 0};
+    const int dc2[4] = {0, 0, -1, +1};
+    const Pacman::Dir d2[4] = {
+        Pacman::Dir::Up, Pacman::Dir::Down,
+        Pacman::Dir::Left, Pacman::Dir::Right
+    };
+
+    for (int i = 0; i < 4; i++)
+    {
+        int nr = dest_r + dr2[i];
+        int nc = dest_c + dc2[i];
+
+        if (nr < 0 || nr >= MAZE_HEIGHT || nc < 0 || nc >= MAZE_WIDTH)
+            continue;
+
+        if (g.maze.tiles[nr][nc] == TileType::TunnelEntry)
+        {
+            p.dir = d2[i];
+            break;
+        }
+    }
+
+    nextX = p.x + p.dirX() * PACMAN_SPEED;
+    nextY = p.y + p.dirY() * PACMAN_SPEED;
+
+    return true;
+}
+
+
 void Pacman::update(GameState& g) {
     Keys k;
     input_poll(k);
@@ -44,7 +148,6 @@ void Pacman::update(GameState& g) {
     int row = y / TILE_SIZE;
     int col = x / TILE_SIZE;
 
-    // --- Direction change si centré ---
     int centerX = x + PACMAN_SIZE / 2;
     int centerY = y + PACMAN_SIZE / 2;
     int colCenter = col * TILE_SIZE + TILE_SIZE / 2;
@@ -53,7 +156,6 @@ void Pacman::update(GameState& g) {
                       (abs(centerY - rowCenter) <= PACMAN_SPEED);
 
     if (isCentered) {
-        // Snap automatique au centre du couloir
         if (dir == Dir::Left || dir == Dir::Right) {
             y = row * TILE_SIZE + (TILE_SIZE/2 - PACMAN_SIZE/2);
         } else if (dir == Dir::Up || dir == Dir::Down) {
@@ -67,24 +169,34 @@ void Pacman::update(GameState& g) {
             int chkCol = col + dcol;
 
             TileType t = g.maze.tiles[chkRow][chkCol];
-            bool isWall = (t == TileType::Wall || t == TileType::GhostDoor);
+            bool isWall = (
+				t == TileType::Wall ||
+				t == TileType::GhostDoorClosed ||
+				t == TileType::GhostDoorOpening ||
+				t == TileType::GhostDoorOpen ||
+				t == TileType::GhostHouse
+			);
+
             if (!isWall) {
                 dir = requestedDir;
-                if (debug) printf("[T=%d] Dir change accepted: new=%d\n", animTick, (int)dir);
-            } else if (debug) {
-                printf("[T=%d] Dir change blocked by wall/door\n", animTick);
             }
         }
     }
 
-    // --- Tentative d’avancée ---
     int nextX = x + dirX() * PACMAN_SPEED;
     int nextY = y + dirY() * PACMAN_SPEED;
     bool blocked = false;
 
     auto is_blocking = [&](int r, int c) {
         TileType t = g.maze.tiles[r][c];
-        return (t == TileType::Wall || t == TileType::GhostDoor);
+        return (
+			t == TileType::Wall ||
+			t == TileType::GhostDoorClosed ||
+			t == TileType::GhostDoorOpening ||
+			t == TileType::GhostDoorOpen ||
+			t == TileType::GhostHouse
+		);
+
     };
 
     switch (dir) {
@@ -94,8 +206,6 @@ void Pacman::update(GameState& g) {
             int rowBottom = (nextY + PACMAN_SIZE - 1) / TILE_SIZE;
             int colRight  = right / TILE_SIZE;
             blocked = is_blocking(rowTop, colRight) || is_blocking(rowBottom, colRight);
-            if (debug) printf("[T=%d] Collision RIGHT: colRight=%d rows=%d,%d blocked=%d\n",
-                              animTick, colRight, rowTop, rowBottom, blocked);
             break;
         }
         case Dir::Left: {
@@ -104,8 +214,6 @@ void Pacman::update(GameState& g) {
             int rowBottom = (nextY + PACMAN_SIZE - 1) / TILE_SIZE;
             int colLeft   = left / TILE_SIZE;
             blocked = is_blocking(rowTop, colLeft) || is_blocking(rowBottom, colLeft);
-            if (debug) printf("[T=%d] Collision LEFT: colLeft=%d rows=%d,%d blocked=%d\n",
-                              animTick, colLeft, rowTop, rowBottom, blocked);
             break;
         }
         case Dir::Down: {
@@ -114,8 +222,6 @@ void Pacman::update(GameState& g) {
             int colRight = (nextX + PACMAN_SIZE - 1) / TILE_SIZE;
             int rowBottom = bottom / TILE_SIZE;
             blocked = is_blocking(rowBottom, colLeft) || is_blocking(rowBottom, colRight);
-            if (debug) printf("[T=%d] Collision DOWN: rowBottom=%d cols=%d,%d blocked=%d\n",
-                              animTick, rowBottom, colLeft, colRight, blocked);
             break;
         }
         case Dir::Up: {
@@ -124,24 +230,24 @@ void Pacman::update(GameState& g) {
             int colRight = (nextX + PACMAN_SIZE - 1) / TILE_SIZE;
             int rowTop   = top / TILE_SIZE;
             blocked = is_blocking(rowTop, colLeft) || is_blocking(rowTop, colRight);
-            if (debug) printf("[T=%d] Collision UP: rowTop=%d cols=%d,%d blocked=%d\n",
-                              animTick, rowTop, colLeft, colRight, blocked);
             break;
         }
         default:
             break;
     }
 
-    if (!blocked) {
+    // Tunnel wrap
+    int tmpX = nextX;
+    int tmpY = nextY;
+    if (!blocked && pacman_try_tunnel_wrap(g, *this, tmpX, tmpY)) {
+        x = tmpX;
+        y = tmpY;
+    } else if (!blocked) {
         x = nextX;
         y = nextY;
-        if (debug) printf("[T=%d] Moved: x=%d y=%d\n", animTick, x, y);
-    } else {
-        if (debug) printf("[T=%d] Collision: blocked dir=%d x=%d y=%d\n", animTick, (int)dir, x, y);
     }
 
-    // --- Collecte ---
-    // On recalcule la case après déplacement
+    // Collecte
     row = y / TILE_SIZE;
     col = x / TILE_SIZE;
 
@@ -151,14 +257,12 @@ void Pacman::update(GameState& g) {
         g.maze.pellet_count--;
         g.score += 10;
         audio_play_pacgomme();
-        if (debug) printf("[T=%d] Pellet eaten, score=%d\n", animTick, g.score);
     } else if (cell == TileType::PowerPellet) {
         cell = TileType::Empty;
         g.maze.power_pellet_count--;
         g.score += 50;
         audio_play_power();
-        // TODO: passer les fantômes en mode frightened
-        if (debug) printf("[T=%d] Power pellet eaten, score=%d\n", animTick, g.score);
+        game_trigger_frightened(g);
     }
 
     animTick++;

@@ -26,6 +26,12 @@
 	constexpr float GHOST_SPEED = 1.8f;    // vitesse légèrement inférieure
 	constexpr int GHOST_OFFSET  = (TILE_SIZE - GHOST_SIZE) / 2;
 	constexpr int NUM_GHOSTS = 4;          // classique: Blinky, Pinky, Inky, Clyde
+	
+	// Temps entre les sorties des fantômes (en ticks)
+	static const int GHOST_RELEASE_INTERVAL_TICKS = 3 * 60; // 3 secondes
+
+	// Temps avant la première sortie
+	static const int FIRST_GHOST_RELEASE_TICKS = 5 * 60; // 5 secondes
 
 	// Points et bonus
 	constexpr int DOT_SCORE = 10;          // pac-gum

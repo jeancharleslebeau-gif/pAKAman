@@ -1,22 +1,58 @@
 #pragma once
-#include <cstdint>
+#include <stdint.h>
+#include <vector>
 #include "game/config.h"
 
-struct GameState; // forward
+struct GameState;
 
-class Ghost {
-public:
-    enum class Dir { Left, Right, Up, Down, None };
+struct Ghost {
+    enum class Dir : uint8_t {
+        None,
+        Left,
+        Right,
+        Up,
+        Down
+    };
 
-    int x, y;          // position (coin haut-gauche du sprite)
-    Dir dir;           // direction actuelle
-    int animTick;      // compteur animation
-    int id;            // identifiant du fantôme (0=rouge,1=bleu,2=rose,3=orange)
-    uint16_t color;    // couleur principale (optionnel)
+    enum class Mode : uint8_t {
+        Scatter,
+        Chase,
+        Frightened,
+        Eaten
+    };
+	
+	enum class HouseState {
+		Inside,
+		Leaving,
+		Outside
+	};
 
-    Ghost(uint16_t c, int ghostId, int startX=0, int startY=0)
-        : x(startX), y(startY), dir(Dir::Left), animTick(0), id(ghostId), color(c) {}
+HouseState houseState = HouseState::Inside;
+int releaseTime_ticks = 0;
+
+
+    uint16_t color;
+    int id;        // 0 rouge, 1 bleu, 2 rose, 3 orange
+
+    int x, y;      // position en pixels
+    int start_col, start_row; // position de départ en cases
+
+    Dir  dir       = Dir::Left;
+    Mode mode      = Mode::Scatter;
+    int  animTick  = 0;
+
+    // Pathfinding pour les yeux (mode Eaten)
+    std::vector<Dir> path;
+
+    Ghost(uint16_t color_, int id_, int col, int row)
+        : color(color_), id(id_), x(col*TILE_SIZE), y(row*TILE_SIZE),
+          start_col(col), start_row(row) {}
 
     void update(GameState& g);
     void draw() const;
+
+    void reverse_direction();
+
+    void on_start_frightened();
+    void on_end_frightened();
 };

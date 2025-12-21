@@ -4,44 +4,71 @@
 #include "game/config.h"
 #include "core/graphics.h"
 
-// On suppose LEVEL_ROWS = 21, LEVEL_COLS = 21 dans level.h
-static const int MAZE_WIDTH  = LEVEL_COLS;
-static const int MAZE_HEIGHT = LEVEL_ROWS;
+// Dimensions du labyrinthe (ASCII)
+static const int MAZE_WIDTH  = LEVEL_COLS;  // doit être 20
+static const int MAZE_HEIGHT = LEVEL_ROWS;  // doit être 21
 
+// ---------------------------------------------------------------------
+// Types de cases du labyrinthe
+// ---------------------------------------------------------------------
 enum class TileType : uint8_t {
-    Empty,          // espace vide / accessible sans pastille
-    Wall,           // '#'
-    Pellet,         // '.'
-    PowerPellet,    // 'o'
-    GhostHouse,     // 'H'
-    GhostDoor,      // 'D'
-    Tunnel,         // 'T' (couloir spécial)
-    PacSpawn,       // 'P'
-    FruitSpawn      // 'F'
+    Empty,              // espace vide
+    Wall,               // '#'
+    Pellet,             // '.'
+    PowerPellet,        // 'o'
+
+    GhostHouse,         // 'H' = intérieur de la maison des fantômes
+
+    GhostDoorClosed,    // 'D' = porte fermée
+    GhostDoorOpening,   // porte en animation d'ouverture
+    GhostDoorOpen,      // porte ouverte
+
+    Tunnel,             // 'T' = case adjacente au tunnel
+    TunnelEntry,        // 'E' = portail de tunnel
+
+    PacSpawn,           // 'P'
+    FruitSpawn          // 'F'
 };
 
+
+// ---------------------------------------------------------------------
+// Structure Maze
+// ---------------------------------------------------------------------
 struct Maze {
+
     TileType tiles[MAZE_HEIGHT][MAZE_WIDTH];
 
     // Comptage
     int pellet_count       = 0;
     int power_pellet_count = 0;
 
-    // Points spéciaux (indices de case)
+    // Points spéciaux
     int pac_spawn_row   = 0;
     int pac_spawn_col   = 0;
     int fruit_row       = -1;
     int fruit_col       = -1;
 
+    // Porte fantôme (unique)
     int ghost_door_row  = -1;
     int ghost_door_col  = -1;
-    int ghost_center_row = -1;   // centre de la maison
+
+    // Centre de la maison fantôme (calculé via 'H')
+    int ghost_center_row = -1;
     int ghost_center_col = -1;
 
+    // Tunnel : on stocke deux entrées (E)
+    int tunnel_entry_count = 0;
+    int tunnel_entry_row[2];
+    int tunnel_entry_col[2];
+
+    // Rendu
     void draw() const;
+
+    // Changer l'état de la porte fantôme
+    void setGhostDoor(TileType newState);
 };
 
-// Chargement depuis une définition ASCII (21x21)
+// Chargement depuis une définition ASCII (20x21)
 void maze_from_ascii(const char* ascii[MAZE_HEIGHT], Maze& maze);
 
 // Niveau 1 : maze_B

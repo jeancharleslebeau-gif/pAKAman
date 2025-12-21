@@ -6,7 +6,13 @@ struct GameState; // forward
 
 class Pacman {
 public:
-    enum class Dir { None=0, Left=1, Right=2, Up=3, Down=4 };;
+    enum class Dir { None=0, Left=1, Right=2, Up=3, Down=4 };
+	
+	bool isCentered() const { 
+		int cx = (x - PACMAN_OFFSET) % TILE_SIZE; 
+		int cy = (y - PACMAN_OFFSET) % TILE_SIZE; 
+		return (cx == 0 && cy == 0); 
+	}
 
     int x, y;
     Dir dir;

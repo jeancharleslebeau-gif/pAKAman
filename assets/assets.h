@@ -34,4 +34,15 @@ extern uint16_t ghost_orange_1[16*16];
 extern uint16_t ghost_scared_0[16*16];
 extern uint16_t ghost_scared_1[16*16];
 
+extern const uint16_t tile_tunnel_wall[];
+extern const uint16_t tile_tunnel_entry_left[];
+extern const uint16_t tile_tunnel_entry_right[];
+extern const uint16_t tile_tunnel_entry_up[];
+extern const uint16_t tile_tunnel_entry_down[];
+extern const uint16_t tile_tunnel_entry_neutral[];
+
+extern const uint16_t tile_ghost_door_closed[];
+extern const uint16_t tile_ghost_door_opening[];
+extern const uint16_t tile_ghost_door_open[];
+
 void assets_init();
