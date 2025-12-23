@@ -5,6 +5,7 @@
 #include "lib/TAS2505_rehs.h"
 #include "lib/audio_player.h"
 #include "lib/audio_sfx.h"
+#include "lib/audio_pmf.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -14,6 +15,11 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
+
+// Gestion du son
+
+AudioPMF audioPMF;
+AudioSettings g_audio_settings;
 
 // -----------------------------------------------------------------------------
 // Configuration interne / debug
@@ -520,12 +526,22 @@ void audio_update(void)
 {
     int16_t mix_buffer[GB_AUDIO_BUFFER_SAMPLE_COUNT];
 
-    // Le mixeur produit un buffer déjà mixé : WAV + SFX + autres pistes
+    // 1) Mixeur interne (WAV + SFX)
     int count = s_audio_player.mix(mix_buffer, GB_AUDIO_BUFFER_SAMPLE_COUNT);
 
+    // 2) Musique PMF
+    audioPMF.render(mix_buffer, GB_AUDIO_BUFFER_SAMPLE_COUNT);
+
+    // 3) Volume master
+    for (int i = 0; i < GB_AUDIO_BUFFER_SAMPLE_COUNT; i++) {
+        mix_buffer[i] = (mix_buffer[i] * g_audio_settings.master_volume) >> 8;
+    }
+
+    // 4) Envoi FIFO
     if (count > 0)
         audio_push_buffer(mix_buffer);
 }
+
 
 // -----------------------------------------------------------------------------
 // Fonctions utilitaires pour Pac-Man

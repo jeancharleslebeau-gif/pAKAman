@@ -3,6 +3,12 @@
 #include "maze.h"
 #include "core/graphics.h"
 #include <string>
+#include "assets/pacman_pmf.h" 
+#include "lib/audio_pmf.h"
+#include "core/audio.h"
+
+
+extern AudioPMF audioPMF;
 
 float g_camera_y = 0.0f;
 
@@ -49,6 +55,11 @@ void game_init(GameState& g) {
 		ghost.releaseTime_ticks = t;
 		t += g.ghostReleaseInterval_ticks;
 	}
+	
+	// === LANCEMENT DE LA MUSIQUE PMF === 
+	audioPMF.stop(); 						// au cas où 
+	audioPMF.init(pacman_pmf); 				// charge le PMF 
+	audioPMF.start(GB_AUDIO_SAMPLE_RATE); 	// démarre la lecture
 
 
 }

@@ -10,12 +10,27 @@
 extern "C" {
 #endif
 
+
 // -----------------------------------------------------------------------------
 // Configuration audio globale
 // -----------------------------------------------------------------------------
 #define GB_AUDIO_BUFFER_FIFO_COUNT      4      // nombre de buffers FIFO
 #define GB_AUDIO_BUFFER_SAMPLE_COUNT    512    // taille d’un buffer (en samples 16 bits)
-#define GB_AUDIO_SAMPLE_RATE            44100  // fréquence d’échantillonnage
+// #define GB_AUDIO_SAMPLE_RATE            44100  // fréquence d’échantillonnage
+#define GB_AUDIO_SAMPLE_RATE            22050
+
+// -----------------------------------------------------------------------------
+// Configuration des réglages de volumr
+// -----------------------------------------------------------------------------
+
+struct AudioSettings {
+    uint8_t music_volume = 255;   // 0–255
+    uint8_t sfx_volume   = 255;   // 0–255
+    uint8_t master_volume = 255;  // 0–255
+};
+
+extern AudioSettings g_audio_settings;
+
 
 // -----------------------------------------------------------------------------
 // Initialisation complète du système audio (I2S + TAS2505 + FIFO)

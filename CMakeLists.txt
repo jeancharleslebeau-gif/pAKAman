@@ -17,6 +17,9 @@ idf_component_register(SRCS
         "lib/sdcard.cpp"
 	"lib/audio_sfx.cpp" 
 	"lib/audio_player.cpp"
+	"lib/audio_pmf.cpp"
+	"lib/pmf_player.cpp"
+	"lib/pmf_player_esp32s3.cpp"
 
 
         # Core

@@ -27,6 +27,9 @@
 	constexpr int GHOST_OFFSET  = (TILE_SIZE - GHOST_SIZE) / 2;
 	constexpr int NUM_GHOSTS = 4;          // classique: Blinky, Pinky, Inky, Clyde
 	
+	#define FRIGHTENED_DURATION_TICKS 360      // exemple : 6 secondes
+	#define FRIGHTENED_BLINK_START_TICKS 120   // exemple : clignotement sur les 2 dernières secondes
+	
 	// Temps entre les sorties des fantômes (en ticks)
 	static const int GHOST_RELEASE_INTERVAL_TICKS = 3 * 60; // 3 secondes
 
