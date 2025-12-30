@@ -1,5 +1,6 @@
 #include "sprite.h"
 #include "core/graphics.h"
+#include "game/config.h"
 
 void draw_sprite16(int x, int y, const uint16_t* pixels) {
     for (int j = 0; j < 16; ++j) {
@@ -23,14 +24,29 @@ void draw_sprite16_transparent(int x, int y, const uint16_t* pixels, uint16_t tr
 }
 
 
-void gfx_drawSprite(int x, int y, const uint16_t* sprite, int w, int h) {
+void gfx_drawSprite(int x, int y,
+                    const uint16_t* sprite,
+                    int w, int h,
+                    uint16_t transparentColor)
+{
     for (int dy = 0; dy < h; dy++) {
+        int py = y + dy;
+        if (py < 0 || py >= SCREEN_H) continue;
+
         for (int dx = 0; dx < w; dx++) {
+            int px = x + dx;
+            if (px < 0 || px >= SCREEN_W) continue;
+
             uint16_t color = sprite[dy * w + dx];
-            lcd_putpixel(x + dx, y + dy, color);
+
+            if (color == transparentColor)
+                continue;
+
+            lcd_putpixel(px, py, color);
         }
     }
 }
+
 
 
 

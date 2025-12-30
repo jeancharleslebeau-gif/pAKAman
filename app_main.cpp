@@ -18,6 +18,7 @@
 #include "lib/sdcard.h"
 #include "lib/audio_sfx.h"
 #include "lib/audio_player.h"
+#include "lib/audio_sfx_cache.h"
 
 // Core
 #include "core/input.h"
@@ -38,7 +39,7 @@
 #include "esp_adc/adc_oneshot.h" 
 #include "esp_adc/adc_cali.h"
 
-int volume = 128; // valeur initiale
+static int nav_cooldown = 0;
 
 // Vérification de la palette avec du texte coloré
 void lcd_test_colors() {
@@ -87,6 +88,84 @@ void lcd_test_colors() {
 
     gfx_flush();
     lcd_refresh();
+}
+
+
+void handle_audio_options_navigation(const Keys& k, int& index) {
+
+    if (nav_cooldown > 0)
+        nav_cooldown--;
+
+    if (nav_cooldown == 0) {
+
+        if (k.up) {
+            index--;
+            if (index < 0) index = 5;
+            audio_sfx_click();
+            nav_cooldown = 8;
+        }
+
+        if (k.down) {
+            index++;
+            if (index > 5) index = 0;
+            audio_sfx_click();
+            nav_cooldown = 8;
+        }
+
+        if (k.left) {
+            audio_sfx_click();
+            if (index == 0) g_audio_settings.music_enabled = !g_audio_settings.music_enabled;
+            if (index == 1 && g_audio_settings.music_volume > 0) g_audio_settings.music_volume -= 8;
+            if (index == 2 && g_audio_settings.sfx_volume > 0)   g_audio_settings.sfx_volume   -= 8;
+            if (index == 3 && g_audio_settings.master_volume > 0) g_audio_settings.master_volume -= 8;
+            nav_cooldown = 8;
+        }
+
+        if (k.right) {
+            audio_sfx_click();
+            if (index == 0) g_audio_settings.music_enabled = !g_audio_settings.music_enabled;
+            if (index == 1 && g_audio_settings.music_volume < 255) g_audio_settings.music_volume += 8;
+            if (index == 2 && g_audio_settings.sfx_volume   < 255) g_audio_settings.sfx_volume   += 8;
+            if (index == 3 && g_audio_settings.master_volume < 255) g_audio_settings.master_volume += 8;
+            nav_cooldown = 8;
+        }
+    }
+}
+
+
+
+void draw_options_menu(GameState::State state, int index) {
+    auto draw_item = [&](int y, const char* text, bool selected) {
+        uint16_t color = selected ? COLOR_YELLOW : COLOR_WHITE;
+        gfx_text(20, y, text, color);
+    };
+
+    gfx_text(20, 20, "OPTIONS", COLOR_WHITE);
+
+    // 0 - Music ON/OFF
+    draw_item(60, g_audio_settings.music_enabled ? "Music: ON" : "Music: OFF", index == 0);
+
+    // 1 - Music volume
+    char buf[64];
+    snprintf(buf, sizeof(buf), "Music Volume: %d", g_audio_settings.music_volume);
+    draw_item(90, buf, index == 1);
+
+    // 2 - SFX volume
+    snprintf(buf, sizeof(buf), "SFX Volume: %d", g_audio_settings.sfx_volume);
+    draw_item(120, buf, index == 2);
+
+    // 3 - Master volume
+    snprintf(buf, sizeof(buf), "Master Volume: %d", g_audio_settings.master_volume);
+    draw_item(150, buf, index == 3);
+
+    // 4 - Highscores (title) ou Quitter la partie (in-game)
+    if (state == GameState::State::OptionsMenu)
+        draw_item(180, "Quitter la partie", index == 4);
+    else
+        draw_item(180, "Highscores", index == 4);
+
+    // 5 - Retour
+    draw_item(210, "Retour", index == 5);
 }
 
 
@@ -221,8 +300,10 @@ extern "C" void app_main(void) {
     expander_init();
     LCD_init();
     sd_init();
+	audio_settings_load();
     audio_init();
-    audio_set_volume(volume);
+	vTaskDelay(pdMS_TO_TICKS(300));
+	sfx_cache_preload_all();
 	// audio_play_wav("/sdcard/PAKAMAN/Sons/PACGOMME.wav");
 	// audio_test();
     input_init();
@@ -230,31 +311,39 @@ extern "C" void app_main(void) {
     highscores_init();   // crée le fichier pAKAman.sco si absent
 
     GameState g;
-    g.state = GameState::State::Title;
+    g.state = GameState::State::TitleScreen;
     g.score = 0;
     g.lives = 3;
     g.levelIndex = 0;
+	static int options_index = 0;
+
 
     while (true) {
         Keys k;
         input_poll(k);   // lecture des touches
  
         switch (g.state) {
-            case GameState::State::Title:
+            case GameState::State::TitleScreen:
                 title_screen_show();
                 if (k.A) {
 					audio_sfx_validate();
                     game_init(g);   // initialise le niveau (via level_init)
-                    g.state = GameState::State::Playing;
+                    g.state = GameState::State::StartingLevel;
                     gfx_clear(COLOR_BLACK);
                     gfx_flush();
-					audio_update();
+					// audio_update remplacé par une tâche dédiée
+					// audio_update();
                 }
                 if (k.MENU) {
 					audio_sfx_click();
                     g.state = GameState::State::Options;
                 }
                 break;
+				
+			case GameState::State::StartingLevel:
+				game_update(g);
+				game_draw(g);
+				break;
 
             case GameState::State::Playing:
                 game_update(g);   // Pac-Man + fantômes
@@ -266,62 +355,71 @@ extern "C" void app_main(void) {
 				if (k.A) {
 					audio_sfx_pop();   // bruit blanc court (test sons)
 				}
-
+				
+				if (k.MENU) {
+					audio_sfx_click();
+                    g.state = GameState::State::OptionsMenu;
+                }
+				
                 if (game_is_over(g)) {
                     highscores_submit(g.score);
                     g.state = GameState::State::Highscores;
                 }
                 break;
-
-            case GameState::State::Options:
-                gfx_clear(COLOR_BLACK);
 				
-                gfx_text(20, 80,  "=== Options ===", COLOR_YELLOW);
-                gfx_text(20, 100, ("Volume: " + std::to_string(volume)).c_str(), COLOR_WHITE);
-                gfx_text(20, 120, "LEFT/RIGHT pour regler", COLOR_WHITE);
-                gfx_text(20, 140, "A pour consulter les scores", COLOR_WHITE);
-                gfx_text(20, 160, "B pour retour", COLOR_YELLOW);
-                gfx_flush();
+			case GameState::State::PacmanDying: 
+				game_update(g); 
+				game_draw(g); 
+				break;
 
-                if (k.left && volume > 0) { 
-					audio_sfx_click();
-					volume -= 8;
-				}
-				if (volume < 1) volume = 0;
-				
-                if (k.right && volume < 255) {
-					audio_sfx_click();
-					volume += 8;
-				}
-				if (volume > 254) volume = 255;	
-                audio_set_volume(volume);
+			case GameState::State::Options:
+			{
+				gfx_clear(COLOR_BLACK);
+				draw_options_menu(g.state, options_index);
 
-                if (k.A) {
+				handle_audio_options_navigation(k, options_index);
+
+				// Highscores
+				if (k.A && options_index == 4) {
 					audio_sfx_validate();
-                    highscores_show();
-                    while (true) {
-                        Keys ks;
-                        input_poll(ks);
-                        if (ks.B) {
-							audio_sfx_cancel(); 
-							break;
-						}	
-                        vTaskDelay(pdMS_TO_TICKS(100));
-                    }
-                } 
+					highscores_show();
+				}
 
-				// testSprites_4lines(animTick); 
-				// animTick++; 
-				// Utilise le menu option pour tester certains éléments
-				// lcd_show_inputs();
-				
-                if (k.B) {
-					g.state = GameState::State::Title;
-					audio_sfx_cancel(); 
-				}	
-                break;
+				// Retour (entrée du menu) ou utilise le bouton B
+				if ((k.A && options_index == 5)|| k.B) {
+					audio_sfx_cancel();
+					g.state = GameState::State::TitleScreen;
+					audio_settings_save();
+				}
+
+				break;
+			}
+
+			case GameState::State::OptionsMenu:
+			{
+				gfx_clear(COLOR_BLACK);
+				draw_options_menu(g.state, options_index);
+
+				handle_audio_options_navigation(k, options_index);
+
+				// Quitter la partie
+				if (k.A && options_index == 4) {
+					audio_sfx_cancel();
+					g.state = GameState::State::TitleScreen;
+					break;
+				}
+
+				// Retour au jeu
+				if ((k.A && options_index == 5) || k.B)  {
+					audio_sfx_validate();
+					g.state = GameState::State::Playing;
+					audio_settings_save();
+				}
+				break ;
+			}
 
             case GameState::State::Paused:
+				gfx_text(70, 140, "PRESS A TO PLAY", COLOR_WHITE);
                 gfx_text(20, 160, "Pause - Appuyez sur A pour reprendre", COLOR_WHITE);
                 gfx_flush();
                 if (k.A) {
@@ -334,25 +432,27 @@ extern "C" void app_main(void) {
                 highscores_show();
                 if (k.B) {
 					audio_sfx_cancel();
-                    g.state = GameState::State::Title;
+                    g.state = GameState::State::TitleScreen;
                 }
                 break;
 
             case GameState::State::GameOver:
-                gfx_text(20, 160, "Game Over - Appuyez sur A pour recommencer", COLOR_RED);
+				gfx_text(70, 140, "PRESS A TO START", COLOR_WHITE);
+                gfx_text(50, 160, "Appuyez sur A pour recommencer", COLOR_YELLOW);
                 if (k.A || k.B) {
 					audio_sfx_validate();
-                    g.state = GameState::State::Title;
+                    g.state = GameState::State::TitleScreen;
                 }
                 break;
 
             default:
-                g.state = GameState::State::Title;
+                g.state = GameState::State::TitleScreen;
                 break;
         }
 		gfx_flush();
 		lcd_refresh();
-		audio_update();
+		// audio__update remplacé par une tâche dédiée toute les 1ms
+		// audio_update();
 		vTaskDelay(pdMS_TO_TICKS(20));
     }
 }

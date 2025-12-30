@@ -75,12 +75,18 @@ void maze_from_ascii(const char* ascii[MAZE_HEIGHT], Maze& maze)
                 case '#': t = TileType::Wall; break;
                 case '.': t = TileType::Pellet; maze.pellet_count++; break;
                 case 'o': t = TileType::PowerPellet; maze.power_pellet_count++; break;
-                case 'H':
-                    t = TileType::GhostHouse;
-                    house_sum_row += row;
-                    house_sum_col += col;
-                    house_count++;
-                    break;
+				case 'H':
+					t = TileType::GhostHouse;
+
+					if (house_count < 4) {
+						maze.ghost_spawn_row[house_count] = row;
+						maze.ghost_spawn_col[house_count] = col;
+					}
+
+					house_sum_row += row;
+					house_sum_col += col;
+					house_count++;
+					break;
                 case 'D':
                     t = TileType::GhostDoorClosed;
                     maze.ghost_door_row = row;

@@ -19,9 +19,11 @@ void draw_sprite_grid_transparent(int gridX, int gridY,
                                   const uint16_t* pixels,
                                   uint16_t transparentColor);
 
-void gfx_drawSprite(int x, int y, const uint16_t* sprite, int w, int h);
-								  
-								  
+void gfx_drawSprite(int x, int y,
+                    const uint16_t* sprite,
+                    int w, int h,
+                    uint16_t transparentColor = 0x0000);
+							  
 								  // Structure générique d’animation
 struct SpriteAnim {
     const uint16_t** frames;   // tableau de pointeurs vers les frames

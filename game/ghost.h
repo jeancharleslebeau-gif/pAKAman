@@ -1,92 +1,115 @@
 #pragma once
-#include <stdint.h>
+#include "config.h"
+#include "maze.h"
 #include <vector>
-#include "game/config.h"
 
 struct GameState;
 
-struct EyeOffset {
-    int dx, dy; // position unique du sprite yeux (contenant les 2 yeux)
-};
+bool is_walkable_for_eyes(TileType t);
 
-static const EyeOffset eyeOffsets[4] = {
-    {2, 4}, // Left
-    {4, 4}, // Right
-    {3, 2}, // Up
-    {3, 6}  // Down
-};
-
-
-struct Ghost {
-    enum class Dir : uint8_t {
-        None,
-        Left,
-        Right,
-        Up,
-        Down
-    };
-
-    enum class Mode : uint8_t {
+struct Ghost
+{
+    enum class Mode {
         Scatter,
         Chase,
         Frightened,
         Eaten
     };
 	
-	enum class HouseState {
-		Inside,
-		Leaving,
-		Outside
+	struct EyeOffset { 
+		int dx; 
+		int dy; 
 	};
-	
-    // --- New arcade IA helpers ---
-    void getScatterTarget(const GameState& g, int& tr, int& tc) const;
-    void getChaseTarget(const GameState& g, int& tr, int& tc) const;
+
+    enum class HouseState {
+        Inside,
+        Leaving,
+        Outside,
+        Returning
+    };
+
+    enum class Dir {
+        None, Left, Right, Up, Down
+    };
+
+    // Position logique
+    int tile_r, tile_c;
+	int prev_tile_r = 0;
+	int prev_tile_c = 0;
+
+    int pixel_offset;
+
+    // Position pixel
+    int x, y;
+
+    // Direction
+    Dir dir;
+    Dir next_dir;
+
+    // Mode
+    Mode mode;
+    Mode previous_mode;
+
+    // Maison
+    HouseState houseState;
+    int eaten_timer;
+
+    // Pathfinding
+    std::vector<std::pair<int,int>> path;
+
+    // Vitesse
+    int speed_normal;
+    int speed_frightened;
+    int speed_tunnel;
+    int speed_eyes;
+
+    // Identité
+    int id;
+
+    // Animation
+    int animTick = 0;
+
+    // Spawn
+    int start_row;
+    int start_col;
+
+    // Release timer
+    int releaseTime_ticks = 0;
+
+    // Constructeur
+    Ghost(int id_, int start_c, int start_r);
+
+    // API
+    void update(GameState& g);
+    void draw() const;
+    void reset_to_start();
+
+    // Frightened
+    void on_start_frightened();
+    void on_end_frightened();
+
+    // Utilitaires
+    static int dirX(Dir d);
+    static int dirY(Dir d);
+    bool isCentered() const;
+
+    // IA
+    std::vector<Dir> getValidDirections(const GameState& g,
+                                        int row, int col,
+                                        bool is_eyes) const;
 
     Dir chooseDirectionTowardsTarget(const GameState& g,
                                      int row, int col,
-                                     int targetRow, int targetCol,
+                                     int tr, int tc,
                                      bool is_eyes) const;
 
     Dir chooseRandomDir(const GameState& g,
                         int row, int col,
                         bool is_eyes) const;
 
-
-HouseState houseState = HouseState::Inside;
-int releaseTime_ticks = 0;
-
-
-    uint16_t color;
-    int id;        // 0 rouge, 1 bleu, 2 rose, 3 orange
-
-    int x, y;      // position en pixels
-    int start_col, start_row; // position de départ en cases
-
-    Dir  dir       = Dir::Left;
-    Mode mode      = Mode::Scatter;
-	// --- Frightened mode timers ---
-	int frightened_timer = 0;            // temps restant en frightened
-
-    int  animTick  = 0;
-
-    // Pathfinding pour les yeux (mode Eaten)
-    std::vector<Dir> path;
-	
-	bool wouldCollideWithOtherGhost(const GameState& g, int row, int col) const;
-	std::vector<Dir> getValidDirections(const GameState& g, int row, int col, bool is_eyes) const;
-
-	bool collidesWithOtherGhost(const GameState& g, int nextRow, int nextCol) const;
-
-    Ghost(uint16_t color_, int id_, int col, int row)
-        : color(color_), id(id_), x(col*TILE_SIZE), y(row*TILE_SIZE),
-          start_col(col), start_row(row) {}
-
-    void update(GameState& g);
-    void draw() const;
+    void getScatterTarget(const GameState& g, int& tr, int& tc) const;
+    void getChaseTarget(const GameState& g, int& tr, int& tc) const;
+	Dir chooseDirectionInsideHouse(const GameState& g, int row, int col);
 
     void reverse_direction();
-
-    void on_start_frightened();
-    void on_end_frightened();
 };

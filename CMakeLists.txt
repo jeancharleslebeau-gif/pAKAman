@@ -20,6 +20,8 @@ idf_component_register(SRCS
 	"lib/audio_pmf.cpp"
 	"lib/pmf_player.cpp"
 	"lib/pmf_player_esp32s3.cpp"
+	"lib/audio_track_sfx.cpp" 
+	"lib/audio_sfx_cache.cpp"
 
 
         # Core

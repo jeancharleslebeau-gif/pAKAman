@@ -16,14 +16,13 @@
 	constexpr int SNAP_EPS   = 3;   // distance sous laquelle on "snap" au centre
 
 	// Pacman
-	constexpr int PACMAN_SIZE = 14;        // sprite ~ taille d’une tile
-	constexpr float PACMAN_SPEED = 2.0f;   // vitesse de déplacement (pixels/frame)
+	constexpr int PACMAN_SIZE = 14;        	 // sprite ~ taille d’une tile
+	constexpr int PACMAN_SPEED = 3;  		 // vitesse de déplacement (pixels/frame)
 	constexpr int PACMAN_OFFSET = (TILE_SIZE - PACMAN_SIZE) / 2;
 	
 
 	// Fantômes
 	constexpr int GHOST_SIZE = 14;
-	constexpr float GHOST_SPEED = 1.8f;    // vitesse légèrement inférieure
 	constexpr int GHOST_OFFSET  = (TILE_SIZE - GHOST_SIZE) / 2;
 	constexpr int NUM_GHOSTS = 4;          // classique: Blinky, Pinky, Inky, Clyde
 	
@@ -44,3 +43,20 @@
 
 	// Mode debug
 	extern int debug;   // 0 = off, 1 = on
+	
+	// -----------------------------------------------------------------------------
+	// Vitesses arcade-faithful (pixels par frame)
+	// -----------------------------------------------------------------------------
+
+	// Vitesse normale des fantômes (Scatter/Chase)
+	#define GHOST_SPEED             2   // base
+
+	// Vitesse des fantômes dans les tunnels (≈ 40% arcade)
+	#define GHOST_SPEED_TUNNEL      1
+
+	// Vitesse des fantômes en mode Frightened (≈ 50% arcade)
+	#define GHOST_SPEED_FRIGHTENED  1
+
+	// Vitesse des yeux (Eaten) — plus rapide que normal
+	#define GHOST_SPEED_EYES        4
+

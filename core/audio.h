@@ -24,9 +24,10 @@ extern "C" {
 // -----------------------------------------------------------------------------
 
 struct AudioSettings {
-    uint8_t music_volume = 255;   // 0–255
-    uint8_t sfx_volume   = 255;   // 0–255
-    uint8_t master_volume = 255;  // 0–255
+	bool music_enabled = true;
+    uint8_t music_volume = 88;    // 0–255
+    uint8_t sfx_volume   = 120;   // 0–255
+    uint8_t master_volume = 140;  // 0–255
 };
 
 extern AudioSettings g_audio_settings;
@@ -57,13 +58,21 @@ uint32_t audio_fifo_buffer_free(void);             // nombre de buffers libres
 // Lecture WAV (robuste, avec parsing d’entête)
 // -----------------------------------------------------------------------------
 void audio_play_wav(const char* path);
+bool audio_wav_is_playing(void);
+
+// -----------------------------------------------------------------------------
+// Lecture de sons (sfx, wav,...) pour pouvoir en jouer plusieurs et gérer leur priorité
+// -----------------------------------------------------------------------------
+void audio_sfx_play(const char* path, int priority);
 
 // -----------------------------------------------------------------------------
 // Fonctions utilitaires pour Pac-Man (s'appuient sur audio_play_wav)
 // -----------------------------------------------------------------------------
 void audio_play_pacgomme(void);
 void audio_play_power(void);
-void audio_play_gameover(void);
+void audio_play_eatghost(void);
+void audio_play_death(void);
+void audio_play_begin(void);
 
 // -----------------------------------------------------------------------------
 // Phase 2 : mixage temps réel et SFX synthétiques

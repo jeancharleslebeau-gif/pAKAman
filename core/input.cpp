@@ -3,6 +3,7 @@
 #include "driver/gpio.h"  
 
 static uint16_t prev=0;
+Keys g_keys;
 
 void input_init(){ prev=0; }
 
@@ -31,6 +32,8 @@ void input_poll(Keys& k) {
 	k.L1  = raw & EXPANDER_KEY_L1;
 	k.joxx = adc_read_joyx();
     k.joxy = adc_read_joyy();
+	
+	g_keys = k;
 }
 
 bool isLongPress(const Keys& k, int key) {
@@ -47,3 +50,6 @@ bool isLongPress(const Keys& k, int key) {
     }
     return false;
 }
+
+
+

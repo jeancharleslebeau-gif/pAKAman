@@ -6,6 +6,9 @@
 #include "lib/audio_player.h"
 #include "lib/audio_sfx.h"
 #include "lib/audio_pmf.h"
+#include "lib/audio_track_sfx.h"
+#include "lib/audio_sfx_cache.h"
+
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -20,6 +23,10 @@
 
 AudioPMF audioPMF;
 AudioSettings g_audio_settings;
+static float g_music_duck = 1.0f;      // 1.0 = volume normal
+static float g_music_duck_target = 1.0f;
+static float g_music_duck_speed = 0.02f; // vitesse du fade
+
 
 // -----------------------------------------------------------------------------
 // Configuration interne / debug
@@ -38,6 +45,25 @@ static void delay_ms(uint32_t milliseconds)
 {
     vTaskDelay(milliseconds / portTICK_PERIOD_MS);
 }
+
+// -----------------------------------------------------------------------------
+// Tache séparée pour jouer la musique de façon régulière
+// -----------------------------------------------------------------------------
+
+static void audio_task(void* arg)
+{
+    const int period_ms =
+        (1000 * GB_AUDIO_BUFFER_SAMPLE_COUNT) / GB_AUDIO_SAMPLE_RATE;
+
+    TickType_t last = xTaskGetTickCount();
+
+    while (true)
+    {
+        audio_update();
+        vTaskDelayUntil(&last, pdMS_TO_TICKS(period_ms));
+    }
+}
+
 
 // -----------------------------------------------------------------------------
 // Données globales audio : FIFO, I2S, test cos44100
@@ -84,10 +110,11 @@ static int g_i2s_callback_count = 0;
 // Mixeur : audio_player + pistes internes
 // -----------------------------------------------------------------------------
 
-static audio_player    s_audio_player;
-audio_track_tone       g_track_tone;
-audio_track_noise      g_track_noise;
-audio_track_wav        g_track_wav;
+static audio_player    	s_audio_player;
+audio_track_tone       	g_track_tone;
+audio_track_noise      	g_track_noise;
+audio_track_wav        	g_track_wav;
+audio_track_sfx 		g_track_sfx;
 
 // -----------------------------------------------------------------------------
 // Helpers FIFO
@@ -400,48 +427,86 @@ int audio_init()
 {
     printf("audio_init()\n");
 
-    // Initialisation du pitch pour le test cos44100
+    // ---------------------------------------------------------
+    // 1) Pitch pour le mode test cos44100
+    // ---------------------------------------------------------
     g_cos_pitch_factor = 256.0f / 4.0f;
     g_cos_pitch_step   = (uint16_t)g_cos_pitch_factor;
 
-    // Reset matériel de l’ampli via l’expander
+    // ---------------------------------------------------------
+    // 2) Reset matériel de l’ampli
+    // ---------------------------------------------------------
     expander_audio_amplifier_reset(0);
     delay_ms(100);
     expander_audio_amplifier_reset(1);
     delay_ms(100);
 
-    // Initialisation I2S
+    // ---------------------------------------------------------
+    // 3) Initialisation I2S
+    // ---------------------------------------------------------
     if (init_i2s() != 0) {
         ESP_LOGE(AUDIO_TAG, "init_i2s failed");
         return -1;
     }
 
-    // Configuration du TAS2505
+    // ---------------------------------------------------------
+    // 4) Configuration TAS2505
+    // ---------------------------------------------------------
     audio_configure_tas2505();
 
-    // Initialisation du mixeur et des pistes
-    s_audio_player.master_volume = 1.0f;
+    // ---------------------------------------------------------
+    // 5) Initialisation du mixeur et des pistes
+    // ---------------------------------------------------------
+    s_audio_player.master_volume = g_audio_settings.master_volume / 255.0f;
 
-    g_track_tone.volume  = 0.8f;
+	// les réglages reprennent désormais les préférences utilisateur
+    /* g_track_tone.volume  = 0.8f;
     g_track_noise.volume = 0.6f;
-    g_track_wav.volume   = 1.0f;
+    g_track_wav.volume   = 1.0f; */
 
     g_track_wav.pitch        = 1.0f;
     g_track_wav.target_pitch = 1.0f;
     g_track_wav.pitch_smooth = 0.15f;
 
+    // Ordre des pistes dans TON moteur
     s_audio_player.add_track(&g_track_tone);
     s_audio_player.add_track(&g_track_noise);
     s_audio_player.add_track(&g_track_wav);
+    s_audio_player.add_track(&g_track_sfx);
 
-#if AUDIO_TEST_MODE
-    audio_test_enable(true);
-#else
-    audio_test_enable(false);
-#endif
+    // ---------------------------------------------------------
+    // 6) Préchargement SFX (sécurisé)
+    // ---------------------------------------------------------
+    // La SD peut être lente → on laisse 200 ms
+    vTaskDelay(pdMS_TO_TICKS(200));
 
+    printf("audio_init: preload SFX...\n");
+    sfx_cache_preload_all();   
+
+    // ---------------------------------------------------------
+    // 7) Mode test audio (sinus)
+    // ---------------------------------------------------------
+	#if AUDIO_TEST_MODE
+		audio_test_enable(true);
+	#else
+		audio_test_enable(false);
+	#endif
+	
+	xTaskCreatePinnedToCore(
+		audio_task,
+		"audio_task",
+		8192,
+		nullptr,
+		5,          // priorité haute
+		nullptr,
+		0            // core 0 (évite le core 1 où tourne WiFi/BT)
+	);
+
+
+    printf("audio_init: OK\n");
     return 0;
 }
+
 
 // -----------------------------------------------------------------------------
 // Lecture de fichiers WAV (PCM 16 bits mono, 44.1 kHz) via audio_track_wav
@@ -518,28 +583,111 @@ void audio_play_wav(const char* path)
     g_track_wav.target_pitch = 1.0f;
 }
 
+
 // -----------------------------------------------------------------------------
 // Mise à jour du mixeur (à appeler dans la boucle principale)
 // -----------------------------------------------------------------------------
 
 void audio_update(void)
 {
-    int16_t mix_buffer[GB_AUDIO_BUFFER_SAMPLE_COUNT];
+    int16_t mix_sfx[GB_AUDIO_BUFFER_SAMPLE_COUNT];
+    int16_t mix_music[GB_AUDIO_BUFFER_SAMPLE_COUNT];
 
     // 1) Mixeur interne (WAV + SFX)
-    int count = s_audio_player.mix(mix_buffer, GB_AUDIO_BUFFER_SAMPLE_COUNT);
+    s_audio_player.mix(mix_sfx, GB_AUDIO_BUFFER_SAMPLE_COUNT);
 
-    // 2) Musique PMF
-    audioPMF.render(mix_buffer, GB_AUDIO_BUFFER_SAMPLE_COUNT);
-
-    // 3) Volume master
+    // 2) Volume SFX
     for (int i = 0; i < GB_AUDIO_BUFFER_SAMPLE_COUNT; i++) {
-        mix_buffer[i] = (mix_buffer[i] * g_audio_settings.master_volume) >> 8;
+        mix_sfx[i] = (mix_sfx[i] * g_audio_settings.sfx_volume) >> 8;
+	}	
+
+	// 3) Musique PMF dans un buffer séparé
+	memset(mix_music, 0, sizeof(mix_music));
+	if (g_audio_settings.music_enabled){
+		audioPMF.render(mix_music, GB_AUDIO_BUFFER_SAMPLE_COUNT);
+	} else {
+		audioPMF.stop();
+	}
+	
+	// 3.B Lissage anti pops and crashs
+	static int16_t prev_sample = 0;
+	static float lp = 0.0f;
+
+	const int music_threshold = 26000;
+	const float alpha = 0.15f;
+	const float smooth = 0.05f;
+
+	for (int i = 0; i < GB_AUDIO_BUFFER_SAMPLE_COUNT; i++) {
+
+		int32_t s = mix_music[i];
+
+		// 1) Smoothing (5 %)
+		s = (prev_sample * smooth) + (s * (1.0f - smooth));
+
+		// 2) Mini-limiteur musique
+		if (s > music_threshold) s = music_threshold;
+		if (s < -music_threshold) s = -music_threshold;
+
+		// 3) Low-pass léger
+		lp = lp + alpha * ((float)s - lp);
+		int16_t filtered = (int16_t)lp;
+
+		// 4) Mise à jour du smoothing
+		prev_sample = filtered;
+
+		// 5) Écriture finale
+		mix_music[i] = filtered;
+	}
+	
+    // 4) Volume musique + ducking
+	if (g_music_duck < g_music_duck_target)
+		g_music_duck += g_music_duck_speed;
+	else if (g_music_duck > g_music_duck_target)
+		g_music_duck -= g_music_duck_speed;
+
+    for (int i = 0; i < GB_AUDIO_BUFFER_SAMPLE_COUNT; i++) {
+        int32_t s = mix_music[i];
+        s = (s * g_audio_settings.music_volume) >> 8;
+        s = (int32_t)(s * g_music_duck);
+        mix_music[i] = (int16_t)s;
     }
 
-    // 4) Envoi FIFO
-    if (count > 0)
-        audio_push_buffer(mix_buffer);
+    // 5) Fusion SFX + musique
+    int16_t mix_final[GB_AUDIO_BUFFER_SAMPLE_COUNT];
+    for (int i = 0; i < GB_AUDIO_BUFFER_SAMPLE_COUNT; i++) {
+        int32_t s = (int32_t)mix_sfx[i] + (int32_t)mix_music[i];
+        if (s > 32767) s = 32767;
+        if (s < -32768) s = -32768;
+        mix_final[i] = (int16_t)s;
+    }
+
+    // 6) Volume master
+    for (int i = 0; i < GB_AUDIO_BUFFER_SAMPLE_COUNT; i++)
+        mix_final[i] = (mix_final[i] * g_audio_settings.master_volume) >> 8;
+
+    // 7) Limiteur soft-knee
+    for (int i = 0; i < GB_AUDIO_BUFFER_SAMPLE_COUNT; i++) {
+        int32_t s = mix_final[i];
+        const int threshold = 28000;
+        const int knee = 2000;
+
+        if (abs(s) > threshold) {
+            int sign = (s >= 0) ? 1 : -1;
+            int excess = abs(s) - threshold;
+            float ratio = 1.0f - (float)excess / knee;
+            if (ratio < 0.0f) ratio = 0.0f;
+            s = threshold + (int)(excess * ratio);
+            s *= sign;
+        }
+
+        if (s > 32767) s = 32767;
+        if (s < -32768) s = -32768;
+
+        mix_final[i] = (int16_t)s;
+    }
+
+    // 8) Envoi FIFO
+    audio_push_buffer(mix_final);
 }
 
 
@@ -549,15 +697,65 @@ void audio_update(void)
 
 void audio_play_pacgomme()
 {
-    audio_play_wav("/sdcard/PAKAMAN/Sons/PACGOMME.wav");
+    const int16_t* data;
+    uint32_t len;
+    if (sfx_cache_load("/sdcard/PAKAMAN/Sons/PACGOMME.wav", &data, &len))
+        g_track_sfx.play(data, len, 20, 1.0f, 1.0f);
+
+    g_music_duck_target = 0.80f;
 }
+
 
 void audio_play_power()
 {
-    audio_play_wav("/sdcard/PAKAMAN/Sons/BONUS.wav");
+    const int16_t* data;
+    uint32_t len;
+    if (sfx_cache_load("/sdcard/PAKAMAN/Sons/BONUS.wav", &data, &len))
+        g_track_sfx.play(data, len, 60, 1.0f, 1.0f);
+
+    g_music_duck_target = 0.50f;
 }
 
-void audio_play_gameover()
+
+void audio_play_eatghost()
 {
+    const int16_t* data;
+    uint32_t len;
+    if (sfx_cache_load("/sdcard/PAKAMAN/Sons/G_EATEN.wav", &data, &len))
+        g_track_sfx.play(data, len, 80, 1.0f, 1.0f);
+
+    g_music_duck_target = 0.35f; // baisse forte
+}
+
+
+void audio_play_death(void)
+{
+    if (!g_audio_settings.music_enabled)
+    {
+        audioPMF.stop();   // <-- AJOUT
+    }
+
     audio_play_wav("/sdcard/PAKAMAN/Sons/DEATH.wav");
 }
+
+
+void audio_play_begin(void)
+{
+    if (!g_audio_settings.music_enabled)
+    {
+        audioPMF.stop();   // <-- AJOUT
+    }
+
+    audio_play_wav("/sdcard/PAKAMAN/Sons/BEGIN.wav");
+}
+
+
+// fonction de confort
+bool audio_wav_is_playing(void)
+{
+    // Le gros fichiers WAV (DEATH, BEGIN, etc.) passent par g_track_wav
+    return g_track_wav.is_active();
+}
+
+
+

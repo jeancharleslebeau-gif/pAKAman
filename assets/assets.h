@@ -5,48 +5,68 @@
 #pragma once
 #include <stdint.h>
 
+#define L_p 16
+#define H_p 16
+
 // Sprites 16×16 (non-const pour pouvoir les initialiser au runtime)
 extern uint16_t tile_wall[16*16];
 extern uint16_t tile_pacgum[16*16];
 extern uint16_t tile_powerdot[16*16];
 
 // sprites de pacman avec son animation
-extern uint16_t pacman_right_0[16*16];
-extern uint16_t pacman_right_1[16*16];
-extern uint16_t pacman_right_2[16*16];
-extern uint16_t pacman_left_0[16*16];
-extern uint16_t pacman_left_1[16*16];
-extern uint16_t pacman_left_2[16*16];
-extern uint16_t pacman_up_0[16*16];
-extern uint16_t pacman_up_1[16*16];
-extern uint16_t pacman_up_2[16*16];
-extern uint16_t pacman_down_0[16*16];
-extern uint16_t pacman_down_1[16*16];
-extern uint16_t pacman_down_2[16*16];
+extern uint16_t pacman_right_0[L_p*H_p];
+extern uint16_t pacman_right_1[L_p*H_p];
+extern uint16_t pacman_right_2[L_p*H_p];
+extern uint16_t pacman_left_0[L_p*H_p];
+extern uint16_t pacman_left_1[L_p*H_p];
+extern uint16_t pacman_left_2[L_p*H_p];
+extern uint16_t pacman_up_0[L_p*H_p];
+extern uint16_t pacman_up_1[L_p*H_p];
+extern uint16_t pacman_up_2[L_p*H_p];
+extern uint16_t pacman_down_0[L_p*H_p];
+extern uint16_t pacman_down_1[L_p*H_p];
+extern uint16_t pacman_down_2[L_p*H_p];
+
+// sprites de la mort de pacman avec son animation
+extern const uint16_t pacman_death_0[14*14];
+extern const uint16_t pacman_death_1[14*14];
+extern const uint16_t pacman_death_2[14*14];
+extern const uint16_t pacman_death_3[14*14];
+extern const uint16_t pacman_death_4[14*14];
+extern const uint16_t pacman_death_5[14*14];
+extern const uint16_t pacman_death_6[14*14];
+extern const uint16_t pacman_death_7[14*14];
+extern const uint16_t pacman_death_8[14*14];
+extern const uint16_t pacman_death_9[14*14];
+extern const uint16_t pacman_death_10[14*14];
+extern const uint16_t pacman_death_11[14*14];
+
+extern const uint16_t* pacman_death_anim[12];
+
 
 // sprties Bliky (rouge alias Shadow: le chasseur de Pac-Man)
-extern uint16_t ghost_red_0[16*16];
-extern uint16_t ghost_red_1[16*16];
+extern uint16_t ghost_red_0[L_p*H_p];
+extern uint16_t ghost_red_1[L_p*H_p];
 
 // sprties de Pinky (rose alias Speedy: il anticipe la position de Pac-Man)
-extern uint16_t ghost_pink_0[16*16];
-extern uint16_t ghost_pink_1[16*16];
+extern uint16_t ghost_pink_0[L_p*H_p];
+extern uint16_t ghost_pink_1[L_p*H_p];
 
 // sprites d'Inky (cyan alias Bashful: comportement mixte)
-extern uint16_t ghost_blue_0[16*16];
-extern uint16_t ghost_blue_1[16*16];
+extern uint16_t ghost_blue_0[L_p*H_p];
+extern uint16_t ghost_blue_1[L_p*H_p];
 
 // sprites de Clyde (Orange alias Pokey: alterne entre se rapprocher et fuir Pac-Man)
-extern uint16_t ghost_orange_0[16*16];
-extern uint16_t ghost_orange_1[16*16];
+extern uint16_t ghost_orange_0[L_p*H_p];
+extern uint16_t ghost_orange_1[L_p*H_p];
 
 // sprites des fantômes effrayés blancs
-extern const uint16_t ghost_white_0[16 * 16]; 
-extern const uint16_t ghost_white_1[16 * 16];
+extern const uint16_t ghost_white_0[L_p*H_p]; 
+extern const uint16_t ghost_white_1[L_p*H_p];
 
 // sprites des fantômes effrayés bleu foncé
-extern uint16_t ghost_scared_0[16*16];
-extern uint16_t ghost_scared_1[16*16];
+extern uint16_t ghost_scared_0[L_p*H_p];
+extern uint16_t ghost_scared_1[L_p*H_p];
 
 // sprites des yeux (10x5) indique la direction des fantômes 
 extern const uint16_t ghost_eyes_left[10 * 5];

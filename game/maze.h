@@ -45,6 +45,8 @@ struct Maze {
     // Points spéciaux
     int pac_spawn_row   = 0;
     int pac_spawn_col   = 0;
+	int ghost_spawn_row[4];
+	int ghost_spawn_col[4];
     int fruit_row       = -1;
     int fruit_col       = -1;
 
@@ -73,3 +75,22 @@ void maze_from_ascii(const char* ascii[MAZE_HEIGHT], Maze& maze);
 
 // Niveau 1 : maze_B
 extern const char* maze_B_ascii[MAZE_HEIGHT];
+
+// Fonctions utilitaires
+inline bool isGhostHouseTile(TileType t)
+{
+    return (t == TileType::GhostHouse);
+}
+
+inline bool isGhostDoorTile(TileType t)
+{
+    return (t == TileType::GhostDoorClosed ||
+            t == TileType::GhostDoorOpening ||
+            t == TileType::GhostDoorOpen);
+}
+
+inline bool isGhostRestrictedForPacman(TileType t)
+{
+    return isGhostHouseTile(t) || isGhostDoorTile(t);
+}
+

@@ -972,7 +972,7 @@
 			}
 		#endif
 
-			u32_draw_count++;
+			u32_draw_count = u32_draw_count + 1;
 			LCD_FAST_test(framebuffer); // start DMA update
 		}
 

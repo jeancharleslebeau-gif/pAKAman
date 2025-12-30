@@ -11,6 +11,8 @@ struct Keys {
     bool A, B, C, D, RUN, MENU, R1, L1;
 };
 
+extern Keys g_keys;
+
 void input_init();
 void input_poll(Keys& k);
 bool isLongPress(const Keys& k, int key);
