@@ -758,4 +758,16 @@ bool audio_wav_is_playing(void)
 }
 
 
+void audio_sfx_play(const char* path, int priority)
+{
+    const int16_t* data = nullptr;
+    uint32_t len = 0;
+
+    if (!sfx_cache_load(path, &data, &len))
+        return;
+
+    // Volume et pitch neutres, priorité passée en paramètre
+    g_track_sfx.play(data, len, priority, 1.0f, 1.0f);
+}
+
 

@@ -5,20 +5,29 @@
 #include "maze.h"
 #include "config.h"
 
+/*
+============================================================
+  GLOBAL GHOST MODES (ARCADE-FAITHFUL)
+============================================================
+*/
 enum class GlobalGhostMode : uint8_t {
     Scatter,
-    Chase,
-    Frightened
+    Chase
 };
 
+/*
+============================================================
+  STRUCTURES UTILITAIRES
+============================================================
+*/
 struct EyeOffset {
-    int dx;
-    int dy;
+    int dx = 0;
+    int dy = 0;
 };
 
 struct GhostModePhase {
-    GlobalGhostMode mode;
-    int duration_ticks;
+    GlobalGhostMode mode = GlobalGhostMode::Scatter;
+    int duration_ticks = 0;   // durée en frames (60 FPS)
 };
 
 struct GhostModeSchedule {
@@ -27,12 +36,17 @@ struct GhostModeSchedule {
 };
 
 struct FloatingScore {
-    int x;
-    int y;
-    int value;
-    int timer;
+    int x = 0;
+    int y = 0;
+    int value = 0;
+    int timer = 0;            // durée d'affichage en frames
 };
 
+/*
+============================================================
+  GAMESTATE : ÉTAT GLOBAL DU JEU
+============================================================
+*/
 struct GameState {
 
     enum class State {
@@ -48,6 +62,11 @@ struct GameState {
         GameOver
     };
 
+    /*
+    --------------------------------------------------------
+      PORTAILS (TUNNELS)
+    --------------------------------------------------------
+    */
     struct PortalPair {
         int T0_r = -1, T0_c = -1;
         int E0_r = -1, E0_c = -1;
@@ -59,6 +78,11 @@ struct GameState {
     PortalPair portalH;
     PortalPair portalV;
 
+    /*
+    --------------------------------------------------------
+      INFORMATIONS GÉNÉRALES DU NIVEAU
+    --------------------------------------------------------
+    */
     State state = State::TitleScreen;
     int levelIndex = 0;
 
@@ -70,13 +94,19 @@ struct GameState {
 
     Maze maze;
     Pacman pacman;
-    int pacman_start_r;
-    int pacman_start_c;
+
+    int pacman_start_r = 0;
+    int pacman_start_c = 0;
     int level = 1;
 
     std::vector<Ghost> ghosts;
     std::vector<FloatingScore> floatingScores;
 
+    /*
+    --------------------------------------------------------
+      GHOST HOUSE (PORTE)
+    --------------------------------------------------------
+    */
     enum class DoorState {
         Closed,
         Opening,
@@ -86,6 +116,11 @@ struct GameState {
     DoorState ghostDoorState = DoorState::Closed;
     int ghostDoorTimer_ticks = 0;
 
+    /*
+    --------------------------------------------------------
+      TIMERS GLOBAUX ET SCORE
+    --------------------------------------------------------
+    */
     int ghostReleaseInterval_ticks = GHOST_RELEASE_INTERVAL_TICKS;
     int elapsed_ticks = 0;
 
@@ -95,22 +130,36 @@ struct GameState {
     int ghostEatScore = 200;
     int pacman_death_timer = 0;
 
+    /*
+    --------------------------------------------------------
+      SÉQUENCE SCATTER / CHASE
+    --------------------------------------------------------
+    */
     GhostModeSchedule schedule;
     int current_phase_index = 0;
     int phase_timer_ticks = 0;
     GlobalGhostMode global_mode = GlobalGhostMode::Scatter;
 
+    /*
+    --------------------------------------------------------
+      FRIGHTENED
+    --------------------------------------------------------
+    */
     int frightened_timer_ticks = 0;
+    int frightened_duration_ticks = 360;
+    int frightened_blink_start_ticks = 120;
     int frightened_chain = 0;
 };
 
-// ------------------------------------------------------------
-//  FONCTION TEMPLATE APRÈS GameState
-// ------------------------------------------------------------
+/*
+============================================================
+  TUNNEL WRAP (PORTAILS)
+============================================================
+*/
 template<typename Actor>
-bool try_portal_wrap(const GameState& g,
-                     const GameState::PortalPair& P,
-                     Actor& a)
+inline bool try_portal_wrap(const GameState& g,
+                            const GameState::PortalPair& P,
+                            Actor& a)
 {
     if (!P.exists)
         return false;
@@ -118,54 +167,54 @@ bool try_portal_wrap(const GameState& g,
     if (!a.isCentered())
         return false;
 
-    // --- Côté 1 -> Côté 0 ---
-    // E1 -> T1
-    bool from_E1_to_T1 =
-        (a.prev_tile_r == P.E1_r && a.prev_tile_c == P.E1_c &&
-         a.tile_r      == P.T1_r && a.tile_c      == P.T1_c);
-
-    // T1 -> E1 (demi-tour vers EXT1)
-    bool from_T1_to_E1 =
-        (a.prev_tile_r == P.T1_r && a.prev_tile_c == P.T1_c &&
-         a.tile_r      == P.E1_r && a.tile_c      == P.E1_c);
-
-    if (from_E1_to_T1 || from_T1_to_E1)
-    {
-        a.tile_r = P.T0_r;
-        a.tile_c = P.T0_c;
-        a.pixel_offset = 0;
-        a.dir = Actor::Dir::Left;   // vers E0
-        return true;
-    }
-
-    // --- Côté 0 -> Côté 1 ---
-    // E0 -> T0
     bool from_E0_to_T0 =
         (a.prev_tile_r == P.E0_r && a.prev_tile_c == P.E0_c &&
          a.tile_r      == P.T0_r && a.tile_c      == P.T0_c);
 
-    // T0 -> E0 (demi-tour vers EXT0)
-    bool from_T0_to_E0 =
+    bool from_T0_to_EXT0 =
         (a.prev_tile_r == P.T0_r && a.prev_tile_c == P.T0_c &&
-         a.tile_r      == P.E0_r && a.tile_c      == P.E0_c);
+         !(a.tile_r == P.E0_r && a.tile_c == P.E0_c));
 
-    if (from_E0_to_T0 || from_T0_to_E0)
+    if (from_E0_to_T0 || from_T0_to_EXT0)
     {
         a.tile_r = P.T1_r;
         a.tile_c = P.T1_c;
         a.pixel_offset = 0;
-        a.dir = Actor::Dir::Right;  // vers E1
+        a.dir = Actor::Dir::Right;
+
+        a.prev_tile_r = a.tile_r;
+        a.prev_tile_c = a.tile_c;
+        return true;
+    }
+
+    bool from_E1_to_T1 =
+        (a.prev_tile_r == P.E1_r && a.prev_tile_c == P.E1_c &&
+         a.tile_r      == P.T1_r && a.tile_c      == P.T1_c);
+
+    bool from_T1_to_EXT1 =
+        (a.prev_tile_r == P.T1_r && a.prev_tile_c == P.T1_c &&
+         !(a.tile_r == P.E1_r && a.tile_c == P.E1_c));
+
+    if (from_E1_to_T1 || from_T1_to_EXT1)
+    {
+        a.tile_r = P.T0_r;
+        a.tile_c = P.T0_c;
+        a.pixel_offset = 0;
+        a.dir = Actor::Dir::Left;
+
+        a.prev_tile_r = a.tile_r;
+        a.prev_tile_c = a.tile_c;
         return true;
     }
 
     return false;
 }
 
-
-// ------------------------------------------------------------
-//  Prototypes
-// ------------------------------------------------------------
-
+/*
+============================================================
+  PROTOTYPES DES FONCTIONS DE JEU
+============================================================
+*/
 void game_init(GameState& g);
 void game_update(GameState& g);
 void game_draw(const GameState& g);

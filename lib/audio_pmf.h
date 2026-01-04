@@ -10,7 +10,10 @@ public:
     void pause(bool p);
     void setVolume(uint8_t vol);
     void render(int16_t* out, int samples);
+	
+	bool isPlaying() const { return player.is_playing(); }
 
+	
 private:
     pmf_player player;
     bool paused = false;

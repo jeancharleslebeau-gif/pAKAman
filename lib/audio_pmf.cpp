@@ -75,3 +75,4 @@ void AudioPMF::render(int16_t* out, int samples)
         out[i] = int16_t(s);
     }
 }
+

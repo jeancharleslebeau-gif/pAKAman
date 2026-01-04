@@ -16,10 +16,21 @@ extern AudioPMF audioPMF;
 extern int debug;
 
 float g_camera_y = 0.0f;
+
 #define DBG(code) do { if (debug) { code; } } while(0)
 
-// === Initialisation des phases Scatter/Chase niveau 1 ===
-void init_ghost_schedule(GameState& g)
+/*
+============================================================
+  SCHEDULE SCATTER / CHASE (NIVEAU 1)
+============================================================
+Arcade-like simplifié :
+  - 7s Scatter
+  - 20s Chase
+  - 7s Scatter
+  - Chase "infini"
+============================================================
+*/
+static void init_ghost_schedule(GameState& g)
 {
     g.schedule.phase_count = 4;
     g.schedule.phases[0] = { GlobalGhostMode::Scatter, 7 * 60 };
@@ -32,12 +43,25 @@ void init_ghost_schedule(GameState& g)
     g.global_mode         = g.schedule.phases[0].mode;
 }
 
-void reverse_ghost_directions(GameState& g)
+/*
+============================================================
+  INVERSION DES DIRECTIONS DES FANTÔMES
+============================================================
+Utilisé lors des changements Scatter/Chase, et au début du
+mode Frightened (via Ghost::on_start_frightened).
+============================================================
+*/
+static void reverse_ghost_directions(GameState& g)
 {
     for (auto& ghost : g.ghosts)
         ghost.reverse_direction();
 }
 
+/*
+============================================================
+  CONDITIONS DE KILL / EAT
+============================================================
+*/
 bool ghost_can_kill(const Ghost& gh)
 {
     if (gh.mode == Ghost::Mode::Eaten) return false;
@@ -52,6 +76,11 @@ bool ghost_can_be_eaten(const Ghost& gh)
             gh.houseState == Ghost::HouseState::Outside);
 }
 
+/*
+============================================================
+  SCORES FLOTTANTS
+============================================================
+*/
 void update_floating_scores(GameState& g)
 {
     for (auto& fs : g.floatingScores)
@@ -63,7 +92,44 @@ void update_floating_scores(GameState& g)
         g.floatingScores.end());
 }
 
-// Collision Pac-Man / fantômes (pixel-based mais robuste)
+/*
+============================================================
+  FRIGHTENED : DÉCLENCHEMENT
+============================================================
+*/
+void game_trigger_frightened(GameState& g)
+{
+    g.frightened_timer_ticks = g.frightened_duration_ticks;
+    g.frightened_chain = 0;
+
+    for (auto& gh : g.ghosts)
+        gh.on_start_frightened();
+}
+
+/*
+============================================================
+  FRIGHTENED : MISE À JOUR GLOBALE
+============================================================
+*/
+static void update_frightened(GameState& g)
+{
+    if (g.frightened_timer_ticks > 0)
+    {
+        g.frightened_timer_ticks--;
+
+        if (g.frightened_timer_ticks == 0)
+        {
+            for (auto& gh : g.ghosts)
+                gh.on_end_frightened();
+        }
+    }
+}
+
+/*
+============================================================
+  COLLISION PAC-MAN / FANTÔMES
+============================================================
+*/
 void check_pacman_ghost_collision(GameState& g)
 {
     int px = g.pacman.x + PACMAN_SIZE / 2;
@@ -82,10 +148,12 @@ void check_pacman_ghost_collision(GameState& g)
 
         if (dist2 < COLLISION_RADIUS * COLLISION_RADIUS)
         {
+            // --- Fantôme mangeable ---
             if (ghost_can_be_eaten(gh))
             {
                 gh.mode = Ghost::Mode::Eaten;
                 gh.path.clear();
+
                 g.score += g.ghostEatScore;
 
                 FloatingScore fs;
@@ -95,11 +163,12 @@ void check_pacman_ghost_collision(GameState& g)
                 fs.timer = 60;
                 g.floatingScores.push_back(fs);
 
-                g.ghostEatScore *= 2;
+                g.ghostEatScore *= 2;   // 200 → 400 → 800 → 1600
                 audio_play_eatghost();
                 continue;
             }
 
+            // --- Fantôme létal pour Pac-Man ---
             if (ghost_can_kill(gh))
             {
                 g.state = GameState::State::PacmanDying;
@@ -113,16 +182,19 @@ void check_pacman_ghost_collision(GameState& g)
     }
 }
 
+/*
+============================================================
+  DÉTECTION AUTOMATIQUE DES TUNNELS
+============================================================
+*/
 void detect_portals(GameState& g)
 {
     const Maze& m = g.maze;
 
-    // Reset
     g.portalH = GameState::PortalPair{};
     g.portalV = GameState::PortalPair{};
 
     // --- Horizontal ---
-    // T0 = Tunnel en colonne 0
     for (int r = 0; r < MAZE_HEIGHT; r++)
         if (m.tiles[r][0] == TileType::Tunnel)
         {
@@ -133,7 +205,6 @@ void detect_portals(GameState& g)
             break;
         }
 
-    // T1 = Tunnel en colonne WIDTH-1
     for (int r = 0; r < MAZE_HEIGHT; r++)
         if (m.tiles[r][MAZE_WIDTH-1] == TileType::Tunnel)
         {
@@ -144,14 +215,12 @@ void detect_portals(GameState& g)
             break;
         }
 
-    // Cohérence horizontale
     if ((g.portalH.T0_r != -1) != (g.portalH.T1_r != -1))
         printf("ERREUR MAP: Portail horizontal incohérent (T0 sans T1 ou inverse)\n");
     else if (g.portalH.T0_r != -1)
         g.portalH.exists = true;
 
     // --- Vertical ---
-    // T2 = Tunnel en ligne 0
     for (int c = 0; c < MAZE_WIDTH; c++)
         if (m.tiles[0][c] == TileType::Tunnel)
         {
@@ -162,7 +231,6 @@ void detect_portals(GameState& g)
             break;
         }
 
-    // T3 = Tunnel en ligne HEIGHT-1
     for (int c = 0; c < MAZE_WIDTH; c++)
         if (m.tiles[MAZE_HEIGHT-1][c] == TileType::Tunnel)
         {
@@ -173,16 +241,18 @@ void detect_portals(GameState& g)
             break;
         }
 
-    // Cohérence verticale
     if ((g.portalV.T0_r != -1) != (g.portalV.T1_r != -1))
-        printf("ERREUR MAP: Portail vertical incohérent (T2 sans T3 ou inverse)\n");
+        printf("ERREUR MAP: Portail vertical incohérent (T0 sans T1 ou inverse)\n");
     else if (g.portalV.T0_r != -1)
         g.portalV.exists = true;
 }
 
-
-// Réinitialisation du niveau (après mort, si vies restantes) mais pas de tout
-void reset_level(GameState& g)
+/*
+============================================================
+  RESET PARTIEL DU NIVEAU (APRÈS MORT)
+============================================================
+*/
+static void reset_level(GameState& g)
 {
     // Reset Pac-Man
     g.pacman.tile_r = g.pacman_start_r;
@@ -192,77 +262,75 @@ void reset_level(GameState& g)
     g.pacman.next_dir = Pacman::Dir::Left;
 
     // Reset ghosts
-	for (auto& gh : g.ghosts)
-	{
-		gh.start_row = g.maze.ghost_spawn_row[gh.id];
-		gh.start_col = g.maze.ghost_spawn_col[gh.id];
-		gh.reset_to_start();
+    for (auto& gh : g.ghosts)
+    {
+        gh.start_row = g.maze.ghost_spawn_row[gh.id];
+        gh.start_col = g.maze.ghost_spawn_col[gh.id];
+        gh.reset_to_start();
 
-		gh.houseState = Ghost::HouseState::Inside;
-		gh.mode = Ghost::Mode::Scatter;
-		gh.previous_mode = Ghost::Mode::Scatter;
-		gh.eaten_timer = 0;
-		gh.path.clear();
+        gh.houseState     = Ghost::HouseState::Inside;
+        gh.mode           = Ghost::Mode::Scatter;
+        gh.previous_mode  = Ghost::Mode::Scatter;
+        gh.eaten_timer    = 0;
+        gh.path.clear();
 
-		gh.pixel_offset = 0;
-		gh.x = gh.tile_c * TILE_SIZE + (TILE_SIZE - GHOST_SIZE) / 2;
-		gh.y = gh.tile_r * TILE_SIZE + (TILE_SIZE - GHOST_SIZE) / 2;
-	}
-
-
+        gh.pixel_offset = 0;
+        gh.x = gh.tile_c * TILE_SIZE + (TILE_SIZE - GHOST_SIZE) / 2;
+        gh.y = gh.tile_r * TILE_SIZE + (TILE_SIZE - GHOST_SIZE) / 2;
+    }
 
     // Reset ghost house
     g.ghostDoorState = GameState::DoorState::Closed;
 
+    // Reset séquence Scatter/Chase (arcade-like)
+    init_ghost_schedule(g);
+
     // Reset timers
-    g.global_mode = GlobalGhostMode::Scatter;
     g.elapsed_ticks = 0;
-	g.ready_waiting_for_input = true;
-	g.ready_timer = 30;
-	
-	if (g_audio_settings.music_enabled) {
-		audioPMF.stop();
-		audioPMF.init(pacman_pmf);
-		audioPMF.start(GB_AUDIO_SAMPLE_RATE);
-	} else {
-		audioPMF.stop();  
-	}
+    g.ready_waiting_for_input = true;
+    g.ready_timer = 30;
+
+    if (g_audio_settings.music_enabled) {
+        audioPMF.stop();
+        // La musique PMF sera relancée après READY!
+    } else {
+        audioPMF.stop();
+    }
 }
 
-
-// Initialisation du niveau lors d'un nouveau niveau
+/*
+============================================================
+  RESET COMPLET DU NIVEAU (NIVEAU SUIVANT)
+============================================================
+*/
 static void reset_level_full(GameState& g)
 {
-    // Recharger la map (pellets, power pellets, murs, tunnels…)
     level_init(g);
-	detect_portals(g);
+    detect_portals(g);
 
-    // Reset Pac-Man
     g.pacman = Pacman(
         g.maze.pac_spawn_col,
         g.maze.pac_spawn_row
     );
-	g.pacman_start_r = g.maze.pac_spawn_row; 
-	g.pacman_start_c = g.maze.pac_spawn_col;
+    g.pacman_start_r = g.maze.pac_spawn_row;
+    g.pacman_start_c = g.maze.pac_spawn_col;
 
-    // Reset fantômes
-	for (auto& gh : g.ghosts)
-	{
-		gh.start_row = g.maze.ghost_spawn_row[gh.id];
-		gh.start_col = g.maze.ghost_spawn_col[gh.id];
-		gh.reset_to_start();
+    for (auto& gh : g.ghosts)
+    {
+        gh.start_row = g.maze.ghost_spawn_row[gh.id];
+        gh.start_col = g.maze.ghost_spawn_col[gh.id];
+        gh.reset_to_start();
 
-		gh.houseState = Ghost::HouseState::Inside;
-		gh.mode = Ghost::Mode::Scatter;
-		gh.previous_mode = Ghost::Mode::Scatter;
-		gh.eaten_timer = 0;
-		gh.path.clear();
+        gh.houseState     = Ghost::HouseState::Inside;
+        gh.mode           = Ghost::Mode::Scatter;
+        gh.previous_mode  = Ghost::Mode::Scatter;
+        gh.eaten_timer    = 0;
+        gh.path.clear();
 
-		gh.pixel_offset = 0;
-		gh.x = gh.tile_c * TILE_SIZE + (TILE_SIZE - GHOST_SIZE) / 2;
-		gh.y = gh.tile_r * TILE_SIZE + (TILE_SIZE - GHOST_SIZE) / 2;
-	}
-
+        gh.pixel_offset = 0;
+        gh.x = gh.tile_c * TILE_SIZE + (TILE_SIZE - GHOST_SIZE) / 2;
+        gh.y = gh.tile_r * TILE_SIZE + (TILE_SIZE - GHOST_SIZE) / 2;
+    }
 
     init_ghost_schedule(g);
     int t = FIRST_GHOST_RELEASE_TICKS;
@@ -271,7 +339,6 @@ static void reset_level_full(GameState& g)
         t += g.ghostReleaseInterval_ticks;
     }
 
-    // Reset timers
     g.frightened_timer_ticks = 0;
     g.frightened_chain = 0;
     g.ghostDoorState = GameState::DoorState::Closed;
@@ -279,38 +346,40 @@ static void reset_level_full(GameState& g)
     g.elapsed_ticks = 0;
     g.ghostEatScore = 200;
 
-    // Relancer la musique BEGIN
     audio_play_begin();
 
-    // Relancer la musique PMF
     if (g_audio_settings.music_enabled) {
         audioPMF.stop();
-        audioPMF.init(pacman_pmf);
-        audioPMF.start(GB_AUDIO_SAMPLE_RATE);
-	} else {
-		audioPMF.stop();  
-	}
-	
+        // La musique PMF sera relancée après READY!
+    } else {
+        audioPMF.stop();
+    }
+
     g.state = GameState::State::StartingLevel;
 }
 
-
-// === Initialisation globale du jeu ===
+/*
+============================================================
+  INITIALISATION GLOBALE DU JEU
+============================================================
+*/
 void game_init(GameState& g) {
     g.score = 0;
     g.lives = 3;
 
     level_init(g);
-	detect_portals(g);
+    detect_portals(g);
 
     g.pacman = Pacman(
         g.maze.pac_spawn_col,
         g.maze.pac_spawn_row
     );
-	
-	g.pacman_start_r = g.maze.pac_spawn_row;
-	g.pacman_start_c = g.maze.pac_spawn_col;
+    g.pacman_start_r = g.maze.pac_spawn_row;
+    g.pacman_start_c = g.maze.pac_spawn_col;
 
+    // IMPORTANT : dimensionner le vecteur de fantômes
+    g.ghosts.clear();
+    g.ghosts.resize(4);
 
     for (int i = 0; i < 4; i++) {
         g.ghosts[i] = Ghost(
@@ -340,13 +409,15 @@ void game_init(GameState& g) {
 
     audioPMF.stop();
     audioPMF.init(pacman_pmf);
-    audioPMF.start(GB_AUDIO_SAMPLE_RATE);
-
-    // BEGIN.wav au début de niveau si tu veux
+    // La musique PMF sera lancée au bon moment
     audio_play_begin();
 }
 
-// Caméra
+/*
+============================================================
+  CAMÉRA VERTICALE
+============================================================
+*/
 static void update_camera(const GameState& g)
 {
     int maze_height_px = MAZE_HEIGHT * TILE_SIZE;
@@ -362,25 +433,13 @@ static void update_camera(const GameState& g)
     g_camera_y = (float)target_y;
 }
 
-// Modes global (scatter/chase + frightened)
+/*
+============================================================
+  MISE À JOUR DES MODES SCATTER / CHASE
+============================================================
+*/
 static void update_modes(GameState& g)
 {
-    if (g.global_mode == GlobalGhostMode::Frightened) {
-        if (g.frightened_timer_ticks > 0) {
-            g.frightened_timer_ticks--;
-            if (g.frightened_timer_ticks == 0) {
-                g.current_phase_index = (g.current_phase_index < g.schedule.phase_count)
-                                        ? g.current_phase_index
-                                        : (g.schedule.phase_count - 1);
-                g.global_mode = g.schedule.phases[g.current_phase_index].mode;
-                reverse_ghost_directions(g);
-                for (auto& ghost : g.ghosts)
-                    ghost.on_end_frightened();
-            }
-        }
-        return;
-    }
-
     if (g.phase_timer_ticks > 0) {
         g.phase_timer_ticks--;
         if (g.phase_timer_ticks == 0) {
@@ -394,21 +453,13 @@ static void update_modes(GameState& g)
     }
 }
 
-// Power pellet
-void game_trigger_frightened(GameState& g)
+/*
+============================================================
+  MISE À JOUR DE LA PORTE DES FANTÔMES
+============================================================
+*/
+static void update_ghost_door(GameState& g)
 {
-    g.global_mode = GlobalGhostMode::Frightened;
-    g.frightened_timer_ticks = 6 * 60;
-    g.frightened_chain = 0;
-    for (auto& ghost : g.ghosts)
-        ghost.on_start_frightened();
-}
-
-// === game_update ===
-void game_update(GameState& g) {
-    g.elapsed_ticks++;
-
-    // Porte des fantômes (comme avant)
     switch (g.ghostDoorState)
     {
         case GameState::DoorState::Closed:
@@ -427,147 +478,216 @@ void game_update(GameState& g) {
             break;
 
         case GameState::DoorState::Open:
-            break;
-    }
-
-    switch (g.state)
-    {
-		case GameState::State::StartingLevel:
-		{
-			if (audio_wav_is_playing()) {
-				update_floating_scores(g);
-				return;
-			} 
-
-			if (g.ready_timer > 0) {
-				g.ready_timer--;
-				update_floating_scores(g);
-				update_camera(g);
-				return;
-			}
-			
-			if (g.ready_waiting_for_input)
-			{
-				update_floating_scores(g);
-
-				if (g_keys.A) {
-					g.ready_waiting_for_input = false;
-					g.state = GameState::State::Playing;
-				}
-				update_camera(g);
-				return;
-			}
-			
-			// Pac-Man ne bouge pas 
-			g.pacman.pixel_offset = 0; 
-			// Fantômes ne bougent pas 
-			for (auto& gh : g.ghosts) 
-				gh.pixel_offset = 0;
-
-			g.state = GameState::State::Playing;
-			update_camera(g);
-			return;
-		}
-
-
-		case GameState::State::PacmanDying:
-		{
-			if (audio_wav_is_playing()) {
-				update_floating_scores(g);
-				return;
-			}
-
-			g.lives--;
-
-			if (g.lives <= 0)
-			{
-				g.gameover_timer = 60;
-				g.gameover_waiting_for_input = true;
-				g.state = GameState::State::GameOver;
-				return;
-			}
-
-			reset_level(g);
-			g.state = GameState::State::StartingLevel;
-			return;
-		}
-
-		
-        case GameState::State::Playing:
         {
-            g.pacman.update(g);
-
+            bool all_outside = true;
             for (auto& gh : g.ghosts)
-                gh.update(g);
+            {
+                if (gh.houseState != Ghost::HouseState::Outside &&
+                    gh.mode != Ghost::Mode::Eaten)
+                {
+                    all_outside = false;
+                    break;
+                }
+            }
 
-            check_pacman_ghost_collision(g);
-
-            update_modes(g);
-            update_camera(g);
-            update_floating_scores(g);
-			
-			if (g.maze.pellet_count == 0)
-			{
-				g.level++;
-				reset_level_full(g);
-				return;
-			}
-
-
+            if (all_outside)
+            {
+                g.ghostDoorState = GameState::DoorState::Closed;
+                g.maze.setGhostDoor(TileType::GhostDoorClosed);
+            }
             break;
         }
-
-		case GameState::State::GameOver:
-		{
-			if (g.gameover_timer > 0)
-			{
-				g.gameover_timer--;
-				return;
-			}
-
-			if (g.gameover_waiting_for_input)
-			{
-				if (g_keys.A)
-				{
-					g.gameover_waiting_for_input = false;
-					g.state = GameState::State::TitleScreen; // ou game_init(g)
-				}
-				return;
-			}
-
-			return;
-		}
-		case GameState::State::TitleScreen:
-		case GameState::State::LevelComplete:
-		case GameState::State::Paused:
-		case GameState::State::Options:
-		case GameState::State::OptionsMenu:
-		case GameState::State::Highscores:
-			return;
     }
 }
 
-// === Draw ===
+/*
+============================================================
+  MISE À JOUR PAR ÉTAT : StartingLevel
+============================================================
+*/
+static void update_state_starting_level(GameState& g)
+{
+    // Animation de mort de Pac-Man non concernée ici
+
+    // Tant que BEGIN.wav joue, on ne bouge rien
+    if (audio_wav_is_playing()) {
+        update_floating_scores(g);
+        update_camera(g);  // garder la caméra cohérente
+        return;
+    }
+
+    // Lancer la musique PMF après BEGIN + READY
+    if (!audioPMF.isPlaying() && g_audio_settings.music_enabled) {
+        audioPMF.init(pacman_pmf);
+        audioPMF.start(GB_AUDIO_SAMPLE_RATE);
+    }
+
+    if (g.ready_timer > 0) {
+        g.ready_timer--;
+        update_floating_scores(g);
+        update_camera(g);
+        return;
+    }
+
+    if (g.ready_waiting_for_input)
+    {
+        update_floating_scores(g);
+
+        if (g_keys.A) {
+            g.ready_waiting_for_input = false;
+            g.state = GameState::State::Playing;
+        }
+        update_camera(g);
+        return;
+    }
+
+    // Pac-Man et fantômes figés sur la position de départ
+    g.pacman.pixel_offset = 0;
+    for (auto& gh : g.ghosts)
+        gh.pixel_offset = 0;
+
+    g.state = GameState::State::Playing;
+    update_camera(g);
+}
+
+/*
+============================================================
+  MISE À JOUR PAR ÉTAT : PacmanDying
+============================================================
+*/
+static void update_state_pacman_dying(GameState& g)
+{
+    // Incrémenter le timer d'animation de mort
+    g.pacman_death_timer++;
+
+    // Tant que le son de mort joue, on attend
+    if (audio_wav_is_playing()) {
+        update_floating_scores(g);
+        return;
+    }
+
+    g.lives--;
+
+    if (g.lives <= 0)
+    {
+        g.gameover_timer = 60;
+        g.gameover_waiting_for_input = true;
+        g.state = GameState::State::GameOver;
+        return;
+    }
+
+    reset_level(g);
+    g.state = GameState::State::StartingLevel;
+}
+
+/*
+============================================================
+  MISE À JOUR PAR ÉTAT : Playing
+============================================================
+*/
+static void update_state_playing(GameState& g)
+{
+    g.pacman.update(g);
+
+    for (auto& gh : g.ghosts)
+        gh.update(g);
+
+    check_pacman_ghost_collision(g);
+
+    update_modes(g);
+    update_camera(g);
+    update_floating_scores(g);
+
+    if (g.maze.pellet_count == 0)
+    {
+        g.level++;
+        reset_level_full(g);
+    }
+}
+
+/*
+============================================================
+  MISE À JOUR PAR ÉTAT : GameOver
+============================================================
+*/
+static void update_state_gameover(GameState& g)
+{
+    if (g.gameover_timer > 0)
+    {
+        g.gameover_timer--;
+        return;
+    }
+
+    if (g.gameover_waiting_for_input)
+    {
+        if (g_keys.A)
+        {
+            g.gameover_waiting_for_input = false;
+            g.state = GameState::State::TitleScreen;
+        }
+        return;
+    }
+}
+
+/*
+============================================================
+  MISE À JOUR PRINCIPALE DU JEU (GAME LOOP)
+============================================================
+*/
+void game_update(GameState& g) {
+    g.elapsed_ticks++;
+
+    update_frightened(g);
+    update_ghost_door(g);
+
+    switch (g.state)
+    {
+        case GameState::State::StartingLevel:
+            update_state_starting_level(g);
+            break;
+
+        case GameState::State::PacmanDying:
+            update_state_pacman_dying(g);
+            break;
+
+        case GameState::State::Playing:
+            update_state_playing(g);
+            break;
+
+        case GameState::State::GameOver:
+            update_state_gameover(g);
+            break;
+
+        case GameState::State::TitleScreen:
+        case GameState::State::LevelComplete:
+        case GameState::State::Paused:
+        case GameState::State::Options:
+        case GameState::State::OptionsMenu:
+        case GameState::State::Highscores:
+            // Pas de logique de gameplay ici pour l’instant
+            break;
+    }
+}
+
+/*
+============================================================
+  RENDU GLOBAL (game_draw)
+============================================================
+*/
 void game_draw(const GameState& g) {
     gfx_clear(COLOR_BLACK);
 
-    // 1) Toujours dessiner le labyrinthe
+    // Labyrinthe
     g.maze.draw();
 
-    // 2) Gestion des états
     switch (g.state)
     {
         case GameState::State::StartingLevel:
         {
-            // Pac-Man visible (arcade-faithful)
             g.pacman.draw(g);
 
-            // Fantômes invisibles → NE PAS les dessiner
-
-            // READY!
             gfx_text(150, 120, "READY!", COLOR_YELLOW);
 
-            // HUD + floating scores
             for (const auto& fs : g.floatingScores)
             {
                 char buf[16];
@@ -577,15 +697,13 @@ void game_draw(const GameState& g) {
                 gfx_text(screen_x, screen_y, buf, COLOR_YELLOW);
             }
 
-            gfx_text(4, 4, ("SCORE: " + std::to_string(g.score)).c_str(), COLOR_WHITE);
+            gfx_text(4,   4, ("SCORE: " + std::to_string(g.score)).c_str(), COLOR_WHITE);
             gfx_text(180, 4, ("LIVES: " + std::to_string(g.lives)).c_str(), COLOR_YELLOW);
-
-            return; // IMPORTANT : ne pas dessiner les fantômes
+            return;
         }
 
         case GameState::State::PacmanDying:
         {
-            // Animation de mort
             int frame = g.pacman_death_timer / 6;
             if (frame < 0)   frame = 0;
             if (frame > 11)  frame = 11;
@@ -597,7 +715,6 @@ void game_draw(const GameState& g) {
 
             gfx_drawSprite(screen_x, screen_y, sprite, 14, 14);
 
-            // HUD + floating scores
             for (const auto& fs : g.floatingScores)
             {
                 char buf[16];
@@ -607,21 +724,18 @@ void game_draw(const GameState& g) {
                 gfx_text(screen_x, screen_y, buf, COLOR_YELLOW);
             }
 
-            gfx_text(4, 4, ("SCORE: " + std::to_string(g.score)).c_str(), COLOR_WHITE);
+            gfx_text(4,   4, ("SCORE: " + std::to_string(g.score)).c_str(), COLOR_WHITE);
             gfx_text(180, 4, ("LIVES: " + std::to_string(g.lives)).c_str(), COLOR_YELLOW);
-
             return;
         }
 
         case GameState::State::GameOver:
         {
             gfx_text(100, 120, "GAME OVER", COLOR_RED);
-            gfx_text(110, 140, "PRESS A", COLOR_WHITE);
+            gfx_text(110, 140, "PRESS A",   COLOR_WHITE);
 
-            // HUD
-            gfx_text(4, 4, ("SCORE: " + std::to_string(g.score)).c_str(), COLOR_WHITE);
+            gfx_text(4,   4, ("SCORE: " + std::to_string(g.score)).c_str(), COLOR_WHITE);
             gfx_text(180, 4, ("LIVES: " + std::to_string(g.lives)).c_str(), COLOR_YELLOW);
-
             return;
         }
 
@@ -630,13 +744,12 @@ void game_draw(const GameState& g) {
             break;
     }
 
-    // 3) État normal : Pac-Man + fantômes
+    // État normal : Pac-Man + fantômes
     g.pacman.draw(g);
 
     for (const auto& ghost : g.ghosts)
-        ghost.draw();
+        ghost.draw(g);
 
-    // Floating scores
     for (const auto& fs : g.floatingScores)
     {
         char buf[16];
@@ -646,12 +759,15 @@ void game_draw(const GameState& g) {
         gfx_text(screen_x, screen_y, buf, COLOR_YELLOW);
     }
 
-    // HUD
-    gfx_text(4, 4, ("SCORE: " + std::to_string(g.score)).c_str(), COLOR_WHITE);
+    gfx_text(4,   4, ("SCORE: " + std::to_string(g.score)).c_str(), COLOR_WHITE);
     gfx_text(180, 4, ("LIVES: " + std::to_string(g.lives)).c_str(), COLOR_YELLOW);
 }
 
-
+/*
+============================================================
+  ÉTAT DE FIN DE PARTIE
+============================================================
+*/
 bool game_is_over(const GameState& g) {
     return (g.state == GameState::State::GameOver);
 }

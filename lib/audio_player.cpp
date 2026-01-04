@@ -2,8 +2,9 @@
 #include <math.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include "core/audio.h"  // pour GB_AUDIO_SAMPLE_RATE
 
-#define SAMPLE_RATE 44100
+static constexpr int SAMPLE_RATE = GB_AUDIO_SAMPLE_RATE;
 
 // -------------------------------------------------------------
 // Tone track

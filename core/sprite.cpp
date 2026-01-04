@@ -1,7 +1,22 @@
+// ============================================================================
+//  sprite.cpp — Routines de dessin de sprites (backend-agnostiques)
+// ============================================================================
+//
+//  Ce module NE DOIT PAS appeler directement lcd_putpixel().
+//  Il utilise uniquement l’API façade gfx_*(), qui redirige vers :
+//      - gfx_fb_*()   (framebuffer + DMA)
+//      - gfx_direct_*() (LCD direct)
+//
+//  Ainsi, tout le moteur reste indépendant du pipeline graphique réel.
+// ============================================================================
+
 #include "sprite.h"
 #include "core/graphics.h"
 #include "game/config.h"
 
+// ---------------------------------------------------------------------------
+//  Sprite 16×16 opaque
+// ---------------------------------------------------------------------------
 void draw_sprite16(int x, int y, const uint16_t* pixels) {
     for (int j = 0; j < 16; ++j) {
         for (int i = 0; i < 16; ++i) {
@@ -11,19 +26,25 @@ void draw_sprite16(int x, int y, const uint16_t* pixels) {
     }
 }
 
-
-void draw_sprite16_transparent(int x, int y, const uint16_t* pixels, uint16_t transparentColor) {
+// ---------------------------------------------------------------------------
+//  Sprite 16×16 avec transparence
+// ---------------------------------------------------------------------------
+void draw_sprite16_transparent(int x, int y,
+                               const uint16_t* pixels,
+                               uint16_t transparentColor)
+{
     for (int j = 0; j < 16; ++j) {
         for (int i = 0; i < 16; ++i) {
             uint16_t c = pixels[j * 16 + i];
-            if (c != transparentColor) {
+            if (c != transparentColor)
                 gfx_putpixel16(x + i, y + j, c);
-            }
         }
     }
 }
 
-
+// ---------------------------------------------------------------------------
+//  Sprite générique (w × h) avec transparence
+// ---------------------------------------------------------------------------
 void gfx_drawSprite(int x, int y,
                     const uint16_t* sprite,
                     int w, int h,
@@ -38,54 +59,46 @@ void gfx_drawSprite(int x, int y,
             if (px < 0 || px >= SCREEN_W) continue;
 
             uint16_t color = sprite[dy * w + dx];
-
-            if (color == transparentColor)
-                continue;
-
-            lcd_putpixel(px, py, color);
+            if (color != transparentColor)
+                gfx_putpixel16(px, py, color);
         }
     }
 }
 
-
-
-
-// Dessine un sprite de taille (spriteW, spriteH) dans une grille (tileSizeX, tileSizeY)
-// gridX, gridY = position en cases de la grille
-// offsetX, offsetY = décalage du sprite dans la case (pour le centrer ou ajuster)
-// pixels = pointeur sur les données du sprite
+// ---------------------------------------------------------------------------
+//  Sprite dans une grille (tilemap) — opaque
+// ---------------------------------------------------------------------------
 void draw_sprite_grid(int gridX, int gridY,
                       int tileSizeX, int tileSizeY,
                       int spriteW, int spriteH,
                       int offsetX, int offsetY,
-                      const uint16_t* pixels) {
+                      const uint16_t* pixels)
+{
     int px = gridX * tileSizeX + offsetX;
     int py = gridY * tileSizeY + offsetY;
 
-    for (int j = 0; j < spriteH; ++j) {
-        for (int i = 0; i < spriteW; ++i) {
-            uint16_t c = pixels[j * spriteW + i];
-            gfx_putpixel16(px + i, py + j, c);
-        }
-    }
+    for (int j = 0; j < spriteH; ++j)
+        for (int i = 0; i < spriteW; ++i)
+            gfx_putpixel16(px + i, py + j, pixels[j * spriteW + i]);
 }
 
-
+// ---------------------------------------------------------------------------
+//  Sprite dans une grille (tilemap) — transparent
+// ---------------------------------------------------------------------------
 void draw_sprite_grid_transparent(int gridX, int gridY,
                                   int tileSizeX, int tileSizeY,
                                   int spriteW, int spriteH,
                                   int offsetX, int offsetY,
                                   const uint16_t* pixels,
-                                  uint16_t transparentColor) {
+                                  uint16_t transparentColor)
+{
     int px = gridX * tileSizeX + offsetX;
     int py = gridY * tileSizeY + offsetY;
 
-    for (int j = 0; j < spriteH; ++j) {
+    for (int j = 0; j < spriteH; ++j)
         for (int i = 0; i < spriteW; ++i) {
             uint16_t c = pixels[j * spriteW + i];
-            if (c != transparentColor) {
+            if (c != transparentColor)
                 gfx_putpixel16(px + i, py + j, c);
-            }
         }
-    }
 }
