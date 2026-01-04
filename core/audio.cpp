@@ -211,7 +211,7 @@ IRAM_ATTR bool i2s_callback(i2s_chan_handle_t handle,
     (void)handle;
     (void)user_context;
 
-    g_i2s_callback_count++;
+    g_i2s_callback_count = g_i2s_callback_count + 1;
 
     int16_t* samples      = (int16_t*)event->dma_buf;
     uint16_t sample_count = event->size / sizeof(int16_t);
@@ -757,5 +757,17 @@ bool audio_wav_is_playing(void)
     return g_track_wav.is_active();
 }
 
+
+void audio_sfx_play(const char* path, int priority)
+{
+    const int16_t* data = nullptr;
+    uint32_t len = 0;
+
+    if (!sfx_cache_load(path, &data, &len))
+        return;
+
+    // Volume et pitch neutres, priorité passée en paramètre
+    g_track_sfx.play(data, len, priority, 1.0f, 1.0f);
+}
 
 

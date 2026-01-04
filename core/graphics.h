@@ -1,51 +1,97 @@
 #pragma once
 #include <stdint.h>
-#include "lib/graphics_basic.h"  
+#include "lib/graphics_basic.h"   // Pour compatibilité avec ton ancien système si nécessaire
 
+/*
+============================================================
+  graphics.h — API graphique unifiée (backend-agnostique)
+------------------------------------------------------------
+Ce fichier expose une API unique utilisée par tout le moteur
+de jeu (sprites, texte, UI, maze, etc.).
+
+Le rendu réel est délégué à un backend sélectionné via
+USE_FRAMEBUFFER :
+
+    USE_FRAMEBUFFER = 1 → backend framebuffer (DMA)
+    USE_FRAMEBUFFER = 0 → backend direct LCD (pixel par pixel)
+
+Les backends sont implémentés dans :
+    lib/gfx/gfx_fb.*      (framebuffer)
+    lib/gfx/gfx_direct.*  (direct LCD)
+
+============================================================
+*/
+
+// ------------------------------------------------------------
+// Choix du backend graphique
+// ------------------------------------------------------------
+#ifndef USE_FRAMEBUFFER
+#define USE_FRAMEBUFFER 1   // 1 = framebuffer (recommandé), 0 = direct LCD
+#endif
+
+// ------------------------------------------------------------
+// API PUBLIQUE — utilisée par le moteur de jeu
+// ------------------------------------------------------------
+
+// Initialise le système graphique (LCD + backend)
 void gfx_init();
+
+// Efface l'écran avec une couleur
 void gfx_clear(uint16_t color);
+
+// Rafraîchit l'écran (push framebuffer → LCD ou no-op selon backend)
 void gfx_flush();
-void gfx_text(int x, int y, const char* txt, uint16_t color);
-void gfx_set_text_color(uint16_t color);
+
+// Dessine un pixel (coordonnées écran)
 void gfx_putpixel16(int x, int y, uint16_t color);
 
+// Affiche du texte (police 8x8)
+void gfx_text(int x, int y, const char* txt, uint16_t color);
+
+// Change la couleur de texte active
+void gfx_set_text_color(uint16_t color);
+
+// Calcule la largeur d’un texte en pixels
+int gfx_text_width(const char* text);
+
+// Centre un texte horizontalement
+void gfx_text_center(int y, const char* text, uint16_t color);
+
+// Largeur d’un caractère (police monospaced)
+int gfx_char_width(char c);
+
+// Instance héritée (compatibilité)
 extern graphics_basic gfx;
 
+// ------------------------------------------------------------
+// API BAS NIVEAU — utilisée par certains modules internes
+// ------------------------------------------------------------
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// Bas niveau
-// Dessine une sous partie d’un bitmap (sprite dans une sprite sheet)
+// Dessine une sous-partie d’un bitmap (sprite sheet)
 void lcd_draw_partial_bitmap(const uint16_t* pixels,
                              int sheetW, int sheetH,
                              int sx, int sy,
                              int spriteW, int spriteH,
                              int dx, int dy);
 
-// Dessine une image
+// Dessine un bitmap complet
 void lcd_draw_bitmap(const uint16_t* pixels,
                      int w, int h,
                      int x, int y);
 
-	
-	
-#ifdef __cplusplus
-}
-#endif
-
-#ifdef __cplusplus
-
-extern "C" {
-#endif
-
+// Couleur de texte active (utilisée par lcd_draw_str)
 extern uint16_t current_text_color;
 
 #ifdef __cplusplus
 }
 #endif
 
-// Couleurs usuelles
+// ------------------------------------------------------------
+// Palette de couleurs standard (BGR565)
+// ------------------------------------------------------------
 #define COLOR_BLACK      0x0000
 #define COLOR_WHITE      0xFFFF
 #define COLOR_RED        0x001F
@@ -65,16 +111,3 @@ extern uint16_t current_text_color;
 #define COLOR_SILVER     0xBDF7
 #define COLOR_GOLD       0x159C
 
-
-void gfx_text(int x, int y, const char* str, unsigned short color);
-void gfx_flush();
-
-
-// Calcule la largeur en pixels d'un texte
-int gfx_text_width(const char* text);
-
-// Centre un texte horizontalement sur l'écran
-void gfx_text_center(int y, const char* text, uint16_t color);
-
-// Largeur d'un caractère de taille fixe
-int gfx_char_width(char c);

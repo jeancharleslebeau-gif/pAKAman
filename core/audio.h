@@ -78,7 +78,10 @@ void audio_play_begin(void);
 // Phase 2 : mixage temps réel et SFX synthétiques
 // -----------------------------------------------------------------------------
 
-// À appeler dans la boucle principale, après gfx_flush() par exemple.
+// Choix 1: À appeler dans la boucle principale, après gfx_flush() par exemple.
+// Choix 2: Comme actuellement: Appelée périodiquement par la tâche audio (audio_task).
+// => dans ce cas, ne pas l'appeler depuis la boucle principale du jeu.
+
 // Cette fonction mettra à jour le mixeur et poussera, si besoin, des buffers
 // dans la FIFO via audio_push_buffer().
 void audio_update(void);

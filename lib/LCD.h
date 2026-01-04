@@ -3,7 +3,32 @@
 #define __LCD_H_
 
 #include "common.h"
+#include <stdint.h>
 
+/*
+===============================================================================
+  LCD.h — Interface bas niveau du contrôleur LCD ST7789 (bus i80 + DMA)
+-------------------------------------------------------------------------------
+Ce module fournit :
+
+  - L'initialisation complète du LCD (bus i80, registres ST7789, rotation…)
+  - L'accès au framebuffer 320×240 (RGB565)
+  - Les primitives bas niveau : lcd_putpixel(), lcd_draw_char(), lcd_draw_str()
+  - Le pipeline DMA propre :
+        lcd_wait_for_dma()
+        lcd_wait_for_vsync()
+        lcd_start_dma()
+        lcd_refresh()
+
+  Ce module ne contient aucune logique de rendu haut niveau.
+  Il est utilisé par les backends graphiques (gfx_fb / gfx_direct).
+===============================================================================
+*/
+
+
+// ============================================================================
+//  Commandes ST7789
+// ============================================================================
 #define ST7789V_CMD_RESET         0x01
 #define ST7789V_CMD_GET_SCANLINE  0x45
 #define ST7789V_CMD_SLPOUT        0x11
@@ -14,46 +39,87 @@
 #define ST7789V_CMD_INVON         0x21
 #define ST7789V_CMD_NORON         0x13
 #define ST7789V_CMD_DISPON        0x29
-#define ST7789V_CMD_RAMWR         0x2c
+#define ST7789V_CMD_RAMWR         0x2C
 #define ST7789V_CMD_RDID          0x04
 #define ST7789V_CMD_MADCTL        0x36
-    #define ST7789V_MADCTRL_MY        0x80  // y flip
-    #define ST7789V_MADCTRL_MX        0x40  // x flip
-    #define ST7789V_MADCTRL_MV        0x20  // x/y swap
-    #define ST7789V_MADCTRL_ML        0x10  // refresh top to bottom / bottom to top
-    #define ST7789V_MADCTRL_RGB       0x08  // RGB/BGR
-    #define ST7789V_MADCTRL_MH        0x04  // refresh left to right / right to left 
 
-#define ST7789V_CMD_CASET       0x2A
-#define ST7789V_CMD_RASET       0x2B
+// Bits du registre MADCTL
+#define ST7789V_MADCTRL_MY        0x80  // flip vertical
+#define ST7789V_MADCTRL_MX        0x40  // flip horizontal
+#define ST7789V_MADCTRL_MV        0x20  // swap X/Y
+#define ST7789V_MADCTRL_ML        0x10  // refresh order
+#define ST7789V_MADCTRL_RGB       0x08  // RGB/BGR
+#define ST7789V_MADCTRL_MH        0x04  // refresh direction
 
-extern uint16_t framebuffer[];
+#define ST7789V_CMD_CASET         0x2A
+#define ST7789V_CMD_RASET         0x2B
 
-void LCD_init();
-void LCD_FAST_test(const uint16_t* u16_pframe_buffer);
-uint32_t LCD_last_refresh_delay();
+
+// ============================================================================
+//  Framebuffer global (défini dans LCD.cpp)
+// ============================================================================
+extern uint16_t framebuffer[320 * 240];
+
+
+// ============================================================================
+//  Initialisation LCD
+// ============================================================================
+void LCD_init();   // Initialise bus i80 + ST7789 + rotation + DMA
+
+
+// ============================================================================
+//  Pipeline DMA propre
+// ============================================================================
+//
+//  lcd_wait_for_dma()   → attend la fin du DMA précédent (non bloquant)
+//  lcd_wait_for_vsync() → optionnel, synchronisation FMARK (anti-tearing)
+//  lcd_start_dma()      → déclenche un transfert DMA depuis framebuffer[]
+//  lcd_refresh()        → pipeline complet (attend + vsync + start DMA)
+//
+void lcd_wait_for_dma();
+void lcd_wait_for_vsync();
+void lcd_start_dma();
+void lcd_refresh();
+
+uint8_t  lcd_refresh_completed();   // indique si le DMA précédent est terminé
+uint32_t LCD_last_refresh_delay();  // timing du dernier DMA (debug)
+
+
+// ============================================================================
+//  Primitives bas niveau (écriture directe dans framebuffer)
+// ============================================================================
+void lcd_putpixel(uint16_t x, uint16_t y, uint16_t color);
+
+void lcd_clear(uint16_t color);     // remplit framebuffer[]
 
 void lcd_draw_char(uint16_t x, uint16_t y, char c);
 void lcd_draw_char_bg(uint16_t x, uint16_t y, char c, uint16_t bgColor);
-void lcd_draw_str(uint16_t x, uint16_t y, const char* pc);
-void lcd_draw_str_bg(uint16_t x, uint16_t y, const char* pc, uint16_t bgColor);
-void lcd_draw_text(uint16_t x, uint16_t y, const char* pc);
 
-void lcd_refresh();
-void lcd_clear(uint16_t u16_pix_color);
-void lcd_printf(const char *pc_format, ...);
-uint8_t lcd_refresh_completed();
+void lcd_draw_str(uint16_t x, uint16_t y, const char* text);
+void lcd_draw_str_bg(uint16_t x, uint16_t y, const char* text, uint16_t bgColor);
+
+void lcd_draw_text(uint16_t x, uint16_t y, const char* text); // alias pratique
+
 void lcd_move_cursor(uint16_t x, uint16_t y);
-void lcd_putpixel(uint16_t x, uint16_t y, uint16_t u16_color);
+void lcd_printf(const char* fmt, ...);
 
-// RGB 888 to RGB 565
-inline uint16_t lcd_colopr_rgb(uint8_t red, uint8_t green, uint8_t blue)
+
+// ============================================================================
+//  Utilitaires
+// ============================================================================
+
+// Conversion RGB888 → RGB565
+static inline uint16_t lcd_color_rgb(uint8_t r, uint8_t g, uint8_t b)
 {
-    return (red >> 3) | ((green >> 2) << 5) | ((blue >> 3) << (5 + 6));
+    return (r >> 3) | ((g >> 2) << 5) | ((b >> 3) << 11);
 }
 
-void lcd_set_fps(uint8_t u8_fps);
+void lcd_set_fps(uint8_t fps);   // configuration du framerate ST7789
 
+
+// ============================================================================
+//  Palette Gamebuino (héritage)
+// ============================================================================
 typedef enum gamebuino_color {
     color_white     = 0xFFFF,
     color_gray      = 0x84D5,

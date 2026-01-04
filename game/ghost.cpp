@@ -1,3 +1,19 @@
+/*
+============================================================
+  ghost.cpp — IA, mouvement et rendu des fantômes
+------------------------------------------------------------
+Ce module gère :
+ - les modes Scatter / Chase / Frightened / Eaten
+ - la ghost house (Inside / Leaving / Outside)
+ - le pathfinding BFS pour les yeux
+ - le mouvement case-based (comme Pac-Man)
+ - le tunnel wrap
+ - le rendu (corps + yeux directionnels)
+
+La logique est strictement arcade-faithful.
+============================================================
+*/
+
 #include "ghost.h"
 #include "game/game.h"
 #include "maze.h"
@@ -5,34 +21,48 @@
 #include "assets/assets.h"
 #include "core/graphics.h"
 #include "core/sprite.h"
+
 #include <queue>
 #include <algorithm>
 #include <random>
 #include <cmath>
 
 extern float g_camera_y;
-extern int debug;
+extern int   debug;
 
+// RNG pour frightened
 static std::mt19937 ghost_rng(123456);
 
-// ------------------------------------------------------------
-// Helpers direction
-// ------------------------------------------------------------
+/*
+============================================================
+  Helpers direction
+============================================================
+*/
 int Ghost::dirX(Dir d) {
     switch (d) {
         case Dir::Left:  return -1;
         case Dir::Right: return +1;
-        default: return 0;
+        default:         return 0;
     }
 }
+
 int Ghost::dirY(Dir d) {
     switch (d) {
         case Dir::Up:    return -1;
         case Dir::Down:  return +1;
-        default: return 0;
+        default:         return 0;
     }
 }
 
+bool Ghost::isCentered() const {
+    return pixel_offset == 0;
+}
+
+/*
+============================================================
+  Demi-tour instantané
+============================================================
+*/
 void Ghost::reverse_direction()
 {
     switch (dir)
@@ -45,21 +75,49 @@ void Ghost::reverse_direction()
     }
 }
 
-
-bool Ghost::isCentered() const {
-    return pixel_offset == 0;
-}
-
-static bool is_opposite(Ghost::Dir a, Ghost::Dir b) {
+/*
+============================================================
+  Opposé de direction (helper interne)
+============================================================
+*/
+static bool is_opposite(Ghost::Dir a, Ghost::Dir b)
+{
     return (a == Ghost::Dir::Left  && b == Ghost::Dir::Right) ||
            (a == Ghost::Dir::Right && b == Ghost::Dir::Left)  ||
            (a == Ghost::Dir::Up    && b == Ghost::Dir::Down)  ||
            (a == Ghost::Dir::Down  && b == Ghost::Dir::Up);
 }
 
-// ------------------------------------------------------------
-// BFS pour les yeux (Eaten)
-// ------------------------------------------------------------
+/*
+============================================================
+  Walkability spéciale pour les yeux (mode Eaten)
+============================================================
+*/
+bool is_walkable_for_eyes(TileType t)
+{
+    switch (t)
+    {
+        case TileType::Wall:
+            return false;
+
+        // Les yeux peuvent traverser la maison et la porte
+        case TileType::GhostHouse:
+        case TileType::GhostDoorClosed:
+        case TileType::GhostDoorOpening:
+        case TileType::GhostDoorOpen:
+            return true;
+
+        // Toutes les cases normales
+        default:
+            return true;
+    }
+}
+
+/*
+============================================================
+  BFS pour les yeux (mode Eaten)
+============================================================
+*/
 static bool bfs_to_target(const Maze& maze,
                           int sr, int sc,
                           int tr, int tc,
@@ -76,23 +134,30 @@ static bool bfs_to_target(const Maze& maze,
     q.push({sr, sc});
     visited[sr][sc] = true;
 
-    while (!q.empty()) {
+    while (!q.empty())
+    {
         Node n = q.front(); q.pop();
 
-        if (n.r == tr && n.c == tc) {
+        if (n.r == tr && n.c == tc)
+        {
+            // Reconstruction du chemin
             path.clear();
             int r = tr, c = tc;
-            while (!(r == sr && c == sc)) {
+
+            while (!(r == sr && c == sc))
+            {
                 path.push_back({r, c});
                 Node p = parent[r][c];
                 r = p.r;
                 c = p.c;
             }
+
             std::reverse(path.begin(), path.end());
             return true;
         }
 
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < 4; i++)
+        {
             int nr = n.r + dr[i];
             int nc = n.c + dc[i];
 
@@ -100,27 +165,34 @@ static bool bfs_to_target(const Maze& maze,
                 nc < 0 || nc >= MAZE_WIDTH)
                 continue;
 
-			if (!is_walkable_for_eyes(maze.tiles[nr][nc]))
-				continue;
+            if (!is_walkable_for_eyes(maze.tiles[nr][nc]))
+                continue;
 
-            if (!visited[nr][nc]) {
+            if (!visited[nr][nc])
+            {
                 visited[nr][nc] = true;
                 parent[nr][nc] = n;
                 q.push({nr, nc});
             }
         }
     }
+
     return false;
 }
 
-// ------------------------------------------------------------
-// Constructeur
-// ------------------------------------------------------------
+/*
+============================================================
+  Constructeur
+============================================================
+*/
 Ghost::Ghost(int id_, int start_c, int start_r)
 {
     id = id_;
-    tile_r = start_r;
+    start_col = start_c;
+    start_row = start_r;
+
     tile_c = start_c;
+    tile_r = start_r;
     pixel_offset = 0;
 
     x = tile_c * TILE_SIZE + (TILE_SIZE - GHOST_SIZE) / 2;
@@ -141,9 +213,11 @@ Ghost::Ghost(int id_, int start_c, int start_r)
     speed_eyes       = GHOST_SPEED_EYES;
 }
 
-// ------------------------------------------------------------
-// Reset après mort de Pac-Man
-// ------------------------------------------------------------
+/*
+============================================================
+  Reset après mort de Pac-Man
+============================================================
+*/
 void Ghost::reset_to_start()
 {
     tile_r = start_row;
@@ -162,9 +236,11 @@ void Ghost::reset_to_start()
     path.clear();
 }
 
-// ------------------------------------------------------------
-// Frightened
-// ------------------------------------------------------------
+/*
+============================================================
+  Frightened : début / fin
+============================================================
+*/
 void Ghost::on_start_frightened()
 {
     if (mode == Mode::Eaten)
@@ -173,14 +249,7 @@ void Ghost::on_start_frightened()
     previous_mode = mode;
     mode = Mode::Frightened;
 
-    // Demi-tour instantané
-    switch (dir) {
-        case Dir::Left:  dir = Dir::Right; break;
-        case Dir::Right: dir = Dir::Left;  break;
-        case Dir::Up:    dir = Dir::Down;  break;
-        case Dir::Down:  dir = Dir::Up;    break;
-        default: break;
-    }
+    reverse_direction();
 }
 
 void Ghost::on_end_frightened()
@@ -189,9 +258,11 @@ void Ghost::on_end_frightened()
         mode = previous_mode;
 }
 
-// ------------------------------------------------------------
-// Directions valides
-// ------------------------------------------------------------
+/*
+============================================================
+  Directions valides
+============================================================
+*/
 std::vector<Ghost::Dir> Ghost::getValidDirections(const GameState& g,
                                                   int row, int col,
                                                   bool is_eyes) const
@@ -210,11 +281,13 @@ std::vector<Ghost::Dir> Ghost::getValidDirections(const GameState& g,
 
         TileType t = g.maze.tiles[nr][nc];
 
-        if (is_eyes) {
-            if (t == TileType::Wall)
-                continue;
+        if (is_eyes)
+        {
+            if (t != TileType::Wall)
+                dirs.push_back(d);
         }
-        else {
+        else
+        {
             if (t == TileType::Wall ||
                 t == TileType::GhostDoorClosed ||
                 t == TileType::GhostDoorOpening)
@@ -223,45 +296,19 @@ std::vector<Ghost::Dir> Ghost::getValidDirections(const GameState& g,
             if (houseState == HouseState::Outside &&
                 (t == TileType::GhostHouse || t == TileType::GhostDoorOpen))
                 continue;
-        }
 
-        dirs.push_back(d);
+            dirs.push_back(d);
+        }
     }
 
     return dirs;
 }
 
-bool is_walkable_for_eyes(TileType t)
-{
-    switch (t)
-    {
-        case TileType::Wall:
-            return false;
-
-        // Les yeux peuvent traverser la maison et la porte
-        case TileType::GhostHouse:
-        case TileType::GhostDoorClosed:
-        case TileType::GhostDoorOpening:
-        case TileType::GhostDoorOpen:
-            return true;
-
-        // Les yeux peuvent traverser toutes les cases normales
-        case TileType::Empty:
-        case TileType::Pellet:
-        case TileType::PowerPellet:
-        case TileType::Tunnel:
-        case TileType::TunnelEntry:
-            return true;
-
-        default:
-            return true;
-    }
-}
-
-
-// ------------------------------------------------------------
-// Choix direction vers cible
-// ------------------------------------------------------------
+/*
+============================================================
+  Choix direction vers une cible (Scatter / Chase / Eyes)
+============================================================
+*/
 Ghost::Dir Ghost::chooseDirectionTowardsTarget(const GameState& g,
                                                int row, int col,
                                                int tr, int tc,
@@ -271,6 +318,7 @@ Ghost::Dir Ghost::chooseDirectionTowardsTarget(const GameState& g,
     if (valid.empty())
         return dir;
 
+    // Évite le demi-tour si possible
     std::vector<Dir> filtered;
     for (Dir d : valid)
         if (!is_opposite(d, dir))
@@ -288,7 +336,8 @@ Ghost::Dir Ghost::chooseDirectionTowardsTarget(const GameState& g,
         int nc = col + dirX(d);
         int dist = std::abs(nr - tr) + std::abs(nc - tc);
 
-        if (dist < bestDist) {
+        if (dist < bestDist)
+        {
             best = d;
             bestDist = dist;
         }
@@ -297,35 +346,11 @@ Ghost::Dir Ghost::chooseDirectionTowardsTarget(const GameState& g,
     return best;
 }
 
-Ghost::Dir Ghost::chooseDirectionInsideHouse(const GameState& g, int row, int col)
-{
-    std::vector<Dir> valid;
-
-    auto try_add = [&](Dir d)
-    {
-        int nr = row + dirY(d);
-        int nc = col + dirX(d);
-
-        if (g.maze.tiles[nr][nc] == TileType::GhostHouse)
-            valid.push_back(d);
-    };
-
-    try_add(Dir::Up);
-    try_add(Dir::Down);
-    try_add(Dir::Left);
-    try_add(Dir::Right);
-
-    if (valid.empty())
-        return dir; // fail-safe
-
-    // Choix simple : direction aléatoire parmi les valides
-    return valid[rand() % valid.size()];
-}
-
-
-// ------------------------------------------------------------
-// Random frightened
-// ------------------------------------------------------------
+/*
+============================================================
+  Direction aléatoire (Frightened)
+============================================================
+*/
 Ghost::Dir Ghost::chooseRandomDir(const GameState& g,
                                   int row, int col,
                                   bool is_eyes) const
@@ -346,18 +371,20 @@ Ghost::Dir Ghost::chooseRandomDir(const GameState& g,
     return valid[dist(ghost_rng)];
 }
 
-// ------------------------------------------------------------
-// Scatter / Chase targets
-// ------------------------------------------------------------
+/*
+============================================================
+  Cibles Scatter / Chase
+============================================================
+*/
 void Ghost::getScatterTarget(const GameState& g, int& tr, int& tc) const
 {
     switch (id)
     {
-        case 0: tr = 0;              tc = MAZE_WIDTH - 1; break;
-        case 1: tr = 0;              tc = 0;              break;
-        case 2: tr = MAZE_HEIGHT-1;  tc = MAZE_WIDTH - 1; break;
-        case 3: tr = MAZE_HEIGHT-1;  tc = 0;              break;
-        default: tr = 0;             tc = MAZE_WIDTH - 1; break;
+        case 0: tr = 0;              tc = MAZE_WIDTH - 1; break; // Blinky
+        case 1: tr = 0;              tc = 0;              break; // Pinky
+        case 2: tr = MAZE_HEIGHT - 1; tc = MAZE_WIDTH - 1; break; // Inky
+        case 3: tr = MAZE_HEIGHT - 1; tc = 0;              break; // Clyde
+        default: tr = 0; tc = MAZE_WIDTH - 1; break;
     }
 }
 
@@ -368,43 +395,51 @@ void Ghost::getChaseTarget(const GameState& g, int& tr, int& tc) const
 
     switch (id)
     {
-        case 0: tr = pr; tc = pc; break;
-
-        case 1:
-            tr = pr + 4 * Ghost::dirY((Ghost::Dir)g.pacman.dir);
-            tc = pc + 4 * Ghost::dirX((Ghost::Dir)g.pacman.dir);
+        case 0: // Blinky
+            tr = pr; tc = pc;
             break;
 
-        case 2:
+        case 1: // Pinky
+            tr = pr + 4 * dirY((Dir)g.pacman.dir);
+            tc = pc + 4 * dirX((Dir)g.pacman.dir);
+            break;
+
+        case 2: // Inky
         {
             const Ghost* blinky = nullptr;
             for (const auto& gh : g.ghosts)
                 if (gh.id == 0) blinky = &gh;
 
-            int aheadR = pr + 2 * Ghost::dirY((Ghost::Dir)g.pacman.dir);
-            int aheadC = pc + 2 * Ghost::dirX((Ghost::Dir)g.pacman.dir);
+            int aheadR = pr + 2 * dirY((Dir)g.pacman.dir);
+            int aheadC = pc + 2 * dirX((Dir)g.pacman.dir);
 
-            if (blinky) {
+            if (blinky)
+            {
                 int br = blinky->tile_r;
                 int bc = blinky->tile_c;
                 int vr = aheadR - br;
                 int vc = aheadC - bc;
                 tr = br + 2 * vr;
                 tc = bc + 2 * vc;
-            } else {
+            }
+            else
+            {
                 tr = aheadR;
                 tc = aheadC;
             }
             break;
         }
 
-        case 3:
+        case 3: // Clyde
         {
             int dist = std::abs(tile_r - pr) + std::abs(tile_c - pc);
-            if (dist >= 8) {
+            if (dist >= 8)
+            {
                 tr = pr;
                 tc = pc;
-            } else {
+            }
+            else
+            {
                 getScatterTarget(g, tr, tc);
             }
             break;
@@ -417,250 +452,279 @@ void Ghost::getChaseTarget(const GameState& g, int& tr, int& tc) const
     }
 }
 
-// ------------------------------------------------------------
-// Update principal
-// ------------------------------------------------------------
+/*
+============================================================
+  Choix direction dans la maison
+============================================================
+*/
+Ghost::Dir Ghost::chooseDirectionInsideHouse(const GameState& g,
+                                             int row, int col)
+{
+    std::vector<Dir> valid;
+
+    auto try_add = [&](Dir d)
+    {
+        int nr = row + dirY(d);
+        int nc = col + dirX(d);
+
+        if (g.maze.tiles[nr][nc] == TileType::GhostHouse)
+            valid.push_back(d);
+    };
+
+    try_add(Dir::Up);
+    try_add(Dir::Down);
+    try_add(Dir::Left);
+    try_add(Dir::Right);
+
+    if (valid.empty())
+        return dir;
+
+    return valid[rand() % valid.size()];
+}
+
+/*
+============================================================
+  UPDATE principal
+============================================================
+*/
 void Ghost::update(GameState& g)
 {
     bool is_eyes = (mode == Mode::Eaten);
     int row = tile_r;
     int col = tile_c;
-	
-	// ------------------------------------------------------------
-	// FAIL-SAFE : si le fantôme est sur une case normale du labyrinthe,
-	// il doit être considéré comme Outside.
-	// ------------------------------------------------------------
-	TileType t = g.maze.tiles[row][col];
 
-	if (t != TileType::GhostHouse &&
-		t != TileType::GhostDoorClosed &&
-		t != TileType::GhostDoorOpening &&
-		t != TileType::GhostDoorOpen)
-	{
-		// Si le fantôme est physiquement dehors, son état doit refléter cela
-		if (houseState != HouseState::Outside)
-			houseState = HouseState::Outside;
-	}
+    // --------------------------------------------------------
+    // Fail-safe : si on n'est plus dans la maison → Outside
+    // --------------------------------------------------------
+    TileType t = g.maze.tiles[row][col];
 
+    if (t != TileType::GhostHouse &&
+        t != TileType::GhostDoorClosed &&
+        t != TileType::GhostDoorOpening &&
+        t != TileType::GhostDoorOpen)
+    {
+        if (houseState != HouseState::Outside)
+            houseState = HouseState::Outside;
+    }
 
+    // --------------------------------------------------------
+    // Vitesses selon mode
+    // --------------------------------------------------------
     int speed = speed_normal;
     if (mode == Mode::Frightened) speed = speed_frightened;
     if (mode == Mode::Eaten)      speed = speed_eyes;
 
     if (g.maze.tiles[row][col] == TileType::Tunnel)
-	{
         speed = speed_tunnel;
-	}	
 
-	// ---------------------------
-	// 1) Mode Eaten → Returning
-	// ---------------------------
-	if (mode == Mode::Eaten)
-	{
-		const int speed = GHOST_SPEED_EYES;
+    /*
+    ============================================================
+      1) Mode Eaten → retour maison (pathfinding)
+    ============================================================
+    */
+    if (mode == Mode::Eaten)
+    {
+        int tr = g.maze.ghost_center_row;
+        int tc = g.maze.ghost_center_col;
 
-		int tr = g.maze.ghost_center_row;
-		int tc = g.maze.ghost_center_col;
+        // Arrivé au centre → reset
+        if (tile_r == tr && tile_c == tc)
+        {
+            mode = previous_mode;
+            houseState = HouseState::Inside;
+            eaten_timer = 30;
 
-		if (tile_r == tr && tile_c == tc)
-		{
-			mode = previous_mode;
-			houseState = HouseState::Inside;
-			eaten_timer = 30;
-			releaseTime_ticks = g.elapsed_ticks + g.ghostReleaseInterval_ticks;
-			pixel_offset = 0;
-			dir = Dir::Up;
+            releaseTime_ticks = g.elapsed_ticks + g.ghostReleaseInterval_ticks;
 
-			x = tile_c * TILE_SIZE + (TILE_SIZE - GHOST_SIZE)/2;
-			y = tile_r * TILE_SIZE + (TILE_SIZE - GHOST_SIZE)/2;
-			return;
-		}
+            pixel_offset = 0;
+            dir = Dir::Up;
 
-		pixel_offset += speed;
+            x = tile_c * TILE_SIZE + (TILE_SIZE - GHOST_SIZE)/2;
+            y = tile_r * TILE_SIZE + (TILE_SIZE - GHOST_SIZE)/2;
+            return;
+        }
 
-		if (pixel_offset >= TILE_SIZE)
-		{
-			pixel_offset = 0;
+        // Avancement
+        pixel_offset += speed;
 
-			prev_tile_r = tile_r;
-			prev_tile_c = tile_c;
+        if (pixel_offset >= TILE_SIZE)
+        {
+            pixel_offset = 0;
 
-			if (path.empty())
-				bfs_to_target(g.maze, tile_r, tile_c, tr, tc, path);
+            prev_tile_r = tile_r;
+            prev_tile_c = tile_c;
 
-			if (!path.empty())
-			{
-				auto [nr, nc] = path.front();
-				path.erase(path.begin());
+            if (path.empty())
+                bfs_to_target(g.maze, tile_r, tile_c, tr, tc, path);
 
-				if (nr < tile_r)      dir = Dir::Up;
-				else if (nr > tile_r) dir = Dir::Down;
-				else if (nc < tile_c) dir = Dir::Left;
-				else if (nc > tile_c) dir = Dir::Right;
+            if (!path.empty())
+            {
+                auto [nr, nc] = path.front();
+                path.erase(path.begin());
 
-				tile_r = nr;
-				tile_c = nc;
-			}
+                if (nr < tile_r)      dir = Dir::Up;
+                else if (nr > tile_r) dir = Dir::Down;
+                else if (nc < tile_c) dir = Dir::Left;
+                else if (nc > tile_c) dir = Dir::Right;
 
-			if (try_portal_wrap(g, g.portalH, *this) ||	try_portal_wrap(g, g.portalV, *this))
-			{
-				x = tile_c * TILE_SIZE + (TILE_SIZE - GHOST_SIZE)/2;
-				y = tile_r * TILE_SIZE + (TILE_SIZE - GHOST_SIZE)/2;
-				return;
-			}
-		}
+                tile_r = nr;
+                tile_c = nc;
+            }
 
-		x = tile_c * TILE_SIZE + (TILE_SIZE - GHOST_SIZE)/2 + dirX(dir) * pixel_offset;
-		y = tile_r * TILE_SIZE + (TILE_SIZE - GHOST_SIZE)/2 + dirY(dir) * pixel_offset;
+            // Tunnel wrap
+            if (try_portal_wrap(g, g.portalH, *this) ||
+                try_portal_wrap(g, g.portalV, *this))
+            {
+                x = tile_c * TILE_SIZE + (TILE_SIZE - GHOST_SIZE)/2;
+                y = tile_r * TILE_SIZE + (TILE_SIZE - GHOST_SIZE)/2;
+                return;
+            }
+        }
 
-		return;
-	}
+        // Position pixel
+        x = tile_c * TILE_SIZE + (TILE_SIZE - GHOST_SIZE)/2 + dirX(dir) * pixel_offset;
+        y = tile_r * TILE_SIZE + (TILE_SIZE - GHOST_SIZE)/2 + dirY(dir) * pixel_offset;
+        return;
+    }
 
+    /*
+    ============================================================
+      2) Inside : déplacement dans la maison
+    ============================================================
+    */
+    if (houseState == HouseState::Inside)
+    {
+        bool door_open   = (g.ghostDoorState == GameState::DoorState::Open);
+        bool can_release = (g.elapsed_ticks >= releaseTime_ticks);
 
-	
-	// ---------------------------
-	// 2) Inside : déplacement libre dans la maison
-	// ---------------------------
-	if (houseState == HouseState::Inside)
-	{
-		bool door_open   = (g.ghostDoorState == GameState::DoorState::Open);
-		bool can_release = (g.elapsed_ticks >= releaseTime_ticks);
+        // A) Porte fermée ou pas mon tour → mouvement interne
+        if (!door_open || (door_open && !can_release))
+        {
+            if (isCentered())
+                dir = chooseDirectionInsideHouse(g, row, col);
 
-		// --- CAS A & B : déplacement libre dans la maison ---
-		// - Porte fermée
-		// - OU porte ouverte mais pas encore mon tour
-		if (!door_open || (door_open && !can_release))
-		{
-			if (isCentered())
-			{
-				dir = chooseDirectionInsideHouse(g, row, col);
-			}
+            pixel_offset += speed;
 
-			pixel_offset += speed;
-			if (pixel_offset >= TILE_SIZE)
-			{
-				int nr = row + dirY(dir);
-				int nc = col + dirX(dir);
+            if (pixel_offset >= TILE_SIZE)
+            {
+                int nr = row + dirY(dir);
+                int nc = col + dirX(dir);
 
-				if (g.maze.tiles[nr][nc] == TileType::GhostHouse)
-				{
-					tile_r = nr;
-					tile_c = nc;
-				}
+                if (g.maze.tiles[nr][nc] == TileType::GhostHouse)
+                {
+                    tile_r = nr;
+                    tile_c = nc;
+                }
 
-				pixel_offset = 0;
-			}
+                pixel_offset = 0;
+            }
 
-			// Toujours tenir x/y synchro, même s'ils "semblent" figés
-			x = tile_c * TILE_SIZE + (TILE_SIZE - GHOST_SIZE) / 2 + dirX(dir) * pixel_offset;
-			y = tile_r * TILE_SIZE + (TILE_SIZE - GHOST_SIZE) / 2 + dirY(dir) * pixel_offset;
+            x = tile_c * TILE_SIZE + (TILE_SIZE - GHOST_SIZE)/2 + dirX(dir) * pixel_offset;
+            y = tile_r * TILE_SIZE + (TILE_SIZE - GHOST_SIZE)/2 + dirY(dir) * pixel_offset;
+            return;
+        }
 
-			return;
-		}
+        // B) Porte ouverte ET c'est mon tour → sortir
+        int up_r = tile_r - 1;
+        int up_c = tile_c;
 
-		// --- CAS C : porte ouverte ET c'est mon tour → diriger vers la porte ---
-		// 1) si déjà sous la porte ouverte et centré → passer en Leaving
-		int up_r = tile_r - 1;
-		int up_c = tile_c;
-		if (isCentered() &&
-			up_r >= 0 && up_r < MAZE_HEIGHT &&
-			g.maze.tiles[up_r][up_c] == TileType::GhostDoorOpen)
-		{
-			houseState   = HouseState::Leaving;
-			dir          = Dir::Up;
-			pixel_offset = 0;
+        if (isCentered() &&
+            up_r >= 0 &&
+            g.maze.tiles[up_r][up_c] == TileType::GhostDoorOpen)
+        {
+            houseState   = HouseState::Leaving;
+            dir          = Dir::Up;
+            pixel_offset = 0;
 
-			x = tile_c * TILE_SIZE + (TILE_SIZE - GHOST_SIZE) / 2;
-			y = tile_r * TILE_SIZE + (TILE_SIZE - GHOST_SIZE) / 2;
-			return;
-		}
+            x = tile_c * TILE_SIZE + (TILE_SIZE - GHOST_SIZE) / 2;
+            y = tile_r * TILE_SIZE + (TILE_SIZE - GHOST_SIZE) / 2;
+            return;
+        }
 
-		// 2) sinon → BFS vers la case juste sous la porte
-		if (isCentered())
-		{
-			int target_r = g.maze.ghost_door_row + 1;
-			int target_c = g.maze.ghost_door_col;
+        // Sinon : BFS vers la case juste sous la porte
+        if (isCentered())
+        {
+            int target_r = g.maze.ghost_door_row + 1;
+            int target_c = g.maze.ghost_door_col;
 
-			if (path.empty())
-				bfs_to_target(g.maze, row, col, target_r, target_c, path);
+            if (path.empty())
+                bfs_to_target(g.maze, row, col, target_r, target_c, path);
 
-			if (!path.empty())
-			{
-				auto [nr, nc] = path.front();
-				path.erase(path.begin());
+            if (!path.empty())
+            {
+                auto [nr, nc] = path.front();
+                path.erase(path.begin());
 
-				if (nr < row)      dir = Dir::Up;
-				else if (nr > row) dir = Dir::Down;
-				else if (nc < col) dir = Dir::Left;
-				else if (nc > col) dir = Dir::Right;
-			}
-		}
+                if (nr < row)      dir = Dir::Up;
+                else if (nr > row) dir = Dir::Down;
+                else if (nc < col) dir = Dir::Left;
+                else if (nc > col) dir = Dir::Right;
+            }
+        }
 
-		pixel_offset += speed;
-		if (pixel_offset >= TILE_SIZE)
-		{
-			tile_r += dirY(dir);
-			tile_c += dirX(dir);
-			pixel_offset = 0;
-		}
+        pixel_offset += speed;
+        if (pixel_offset >= TILE_SIZE)
+        {
+            tile_r += dirY(dir);
+            tile_c += dirX(dir);
+            pixel_offset = 0;
+        }
 
-		x = tile_c * TILE_SIZE + (TILE_SIZE - GHOST_SIZE) / 2 + dirX(dir) * pixel_offset;
-		y = tile_r * TILE_SIZE + (TILE_SIZE - GHOST_SIZE) / 2 + dirY(dir) * pixel_offset;
+        x = tile_c * TILE_SIZE + (TILE_SIZE - GHOST_SIZE) / 2 + dirX(dir) * pixel_offset;
+        y = tile_r * TILE_SIZE + (TILE_SIZE - GHOST_SIZE) / 2 + dirY(dir) * pixel_offset;
+        return;
+    }
 
-		return;
-	}
+    /*
+    ============================================================
+      3) Leaving → Outside
+    ============================================================
+    */
+    if (houseState == HouseState::Leaving)
+    {
+        // Porte refermée → fantôme figé
+        if (g.ghostDoorState != GameState::DoorState::Open)
+        {
+            pixel_offset = 0;
+            x = tile_c * TILE_SIZE + (TILE_SIZE - GHOST_SIZE) / 2;
+            y = tile_r * TILE_SIZE + (TILE_SIZE - GHOST_SIZE) / 2;
+            return;
+        }
 
+        // Avancer vers le haut
+        pixel_offset += speed;
+        if (pixel_offset >= TILE_SIZE)
+        {
+            tile_r += dirY(dir);
+            tile_c += dirX(dir);
+            pixel_offset = 0;
+        }
 
-	// ---------------------------
-	// 3) Leaving → Outside
-	// ---------------------------
-	if (houseState == HouseState::Leaving)
-	{
-		// Si la porte se referme → bloqué
-		if (g.ghostDoorState != GameState::DoorState::Open)
-		{
-			pixel_offset = 0;
+        x = tile_c * TILE_SIZE + (TILE_SIZE - GHOST_SIZE) / 2 + dirX(dir) * pixel_offset;
+        y = tile_r * TILE_SIZE + (TILE_SIZE - GHOST_SIZE) / 2 + dirY(dir) * pixel_offset;
 
-			// Mise à jour visuelle même figé
-			x = tile_c * TILE_SIZE + (TILE_SIZE - GHOST_SIZE) / 2;
-			y = tile_r * TILE_SIZE + (TILE_SIZE - GHOST_SIZE) / 2;
-			return;
-		}
+        // Dès qu’on quitte la porte → Outside
+        TileType t2 = g.maze.tiles[tile_r][tile_c];
+        if (t2 != TileType::GhostDoorOpen)
+        {
+            houseState = HouseState::Outside;
 
-		// Avancer vers le haut
-		pixel_offset += speed;
-		if (pixel_offset >= TILE_SIZE)
-		{
-			tile_r += dirY(dir);
-			tile_c += dirX(dir);
-			pixel_offset = 0;
-		}
+            if (mode != Mode::Eaten && mode != Mode::Frightened)
+            {
+                mode = (g.global_mode == GlobalGhostMode::Scatter)
+                       ? Mode::Scatter
+                       : Mode::Chase;
+            }
+        }
 
-		// Mise à jour visuelle obligatoire
-		x = tile_c * TILE_SIZE + (TILE_SIZE - GHOST_SIZE) / 2 + dirX(dir) * pixel_offset;
-		y = tile_r * TILE_SIZE + (TILE_SIZE - GHOST_SIZE) / 2 + dirY(dir) * pixel_offset;
+        return;
+    }
 
-		// Dès qu'on quitte la porte → Outside
-		TileType t = g.maze.tiles[tile_r][tile_c];
-		if (t != TileType::GhostDoorOpen)
-		{
-			houseState = HouseState::Outside;
-
-			if (mode != Mode::Eaten && mode != Mode::Frightened)
-			{
-				mode = (g.global_mode == GlobalGhostMode::Scatter)
-					   ? Mode::Scatter
-					   : Mode::Chase;
-			}
-		}
-
-		return;
-	}
-
-
-    // ---------------------------
-    // 4) Choix direction (Scatter / Chase / Frightened)
-    // ---------------------------
+    /*
+    ============================================================
+      4) Outside : choix de direction (Scatter / Chase / Frightened)
+    ============================================================
+    */
     if (isCentered())
     {
         if (mode == Mode::Frightened)
@@ -681,43 +745,43 @@ void Ghost::update(GameState& g)
         }
     }
 
-	// ---------------------------
-	// 5) Mouvement case-based
-	// ---------------------------
-	pixel_offset += speed;
+    /*
+    ============================================================
+      5) Mouvement case-based + tunnel wrap
+    ============================================================
+    */
+    pixel_offset += speed;
 
-	if (pixel_offset >= TILE_SIZE)
-	{
-		
-		// Mémoriser la tuile précédente
-		prev_tile_r = tile_r; 
-		prev_tile_c = tile_c;
-		
-		// Nouvelle tuile
-		tile_r += dirY(dir);
-		tile_c += dirX(dir);
-		pixel_offset = 0;
+    if (pixel_offset >= TILE_SIZE)
+    {
+        prev_tile_r = tile_r;
+        prev_tile_c = tile_c;
 
-		int nr, nc;
-		if (try_portal_wrap(g, g.portalH, *this) || try_portal_wrap(g, g.portalH, *this))
-		{
+        tile_r += dirY(dir);
+        tile_c += dirX(dir);
+        pixel_offset = 0;
 
-			x = tile_c * TILE_SIZE + (TILE_SIZE - GHOST_SIZE)/2;
-			y = tile_r * TILE_SIZE + (TILE_SIZE - GHOST_SIZE)/2;
-			return;
-		}
-	}
+        // Tunnel wrap
+        if (try_portal_wrap(g, g.portalH, *this) ||
+            try_portal_wrap(g, g.portalV, *this))
+        {
+            x = tile_c * TILE_SIZE + (TILE_SIZE - GHOST_SIZE)/2;
+            y = tile_r * TILE_SIZE + (TILE_SIZE - GHOST_SIZE)/2;
+            return;
+        }
+    }
 
-	// --- Position normale (pas de wrap) ---
-	x = tile_c * TILE_SIZE + (TILE_SIZE - GHOST_SIZE) / 2 + dirX(dir) * pixel_offset;
-	y = tile_r * TILE_SIZE + (TILE_SIZE - GHOST_SIZE) / 2 + dirY(dir) * pixel_offset;
-}	
+    // Position pixel
+    x = tile_c * TILE_SIZE + (TILE_SIZE - GHOST_SIZE) / 2 + dirX(dir) * pixel_offset;
+    y = tile_r * TILE_SIZE + (TILE_SIZE - GHOST_SIZE) / 2 + dirY(dir) * pixel_offset;
+}
 
-
-// ------------------------------------------------------------
-// Draw
-// ------------------------------------------------------------
-void Ghost::draw() const
+/*
+============================================================
+  DRAW — corps + yeux directionnels
+============================================================
+*/
+void Ghost::draw(const GameState& g) const
 {
     const uint16_t* body_anim[2] = { nullptr, nullptr };
     const uint16_t* eyes = nullptr;
@@ -725,17 +789,35 @@ void Ghost::draw() const
     bool is_frightened = (mode == Mode::Frightened);
     bool is_eyes       = (mode == Mode::Eaten);
 
-    // --- 1) Sélection du corps ---
+    /*
+    ------------------------------------------------------------
+      1) Sélection du corps
+    ------------------------------------------------------------
+    */
     if (is_eyes)
     {
-        // Corps invisible → on ne dessine que les yeux
+        // Corps invisible → yeux seuls
         body_anim[0] = nullptr;
         body_anim[1] = nullptr;
     }
     else if (is_frightened)
     {
-        body_anim[0] = ghost_scared_0;
-        body_anim[1] = ghost_scared_1;
+        bool blink = false;
+        int t = g.frightened_timer_ticks;
+
+        if (t <= g.frightened_blink_start_ticks)
+            blink = ((t / 8) % 2 == 0);
+
+        if (blink)
+        {
+            body_anim[0] = ghost_white_0;
+            body_anim[1] = ghost_white_1;
+        }
+        else
+        {
+            body_anim[0] = ghost_scared_0;
+            body_anim[1] = ghost_scared_1;
+        }
     }
     else
     {
@@ -748,7 +830,11 @@ void Ghost::draw() const
         }
     }
 
-    // --- 2) Sélection des yeux ---
+    /*
+    ------------------------------------------------------------
+      2) Sélection des yeux directionnels
+    ------------------------------------------------------------
+    */
     switch (dir)
     {
         case Dir::Left:  eyes = ghost_eyes_left;  break;
@@ -758,7 +844,6 @@ void Ghost::draw() const
         default:         eyes = ghost_eyes_left;  break;
     }
 
-    // Offsets EXACTS que tu utilisais avant
     static const EyeOffset eyeOffsets[4] = {
         {2, 4}, // Left
         {4, 4}, // Right
@@ -770,31 +855,36 @@ void Ghost::draw() const
     int sx = x;
     int sy = y - (int)g_camera_y;
 
-    // --- 3) Dessin du corps ---
+    /*
+    ------------------------------------------------------------
+      3) Dessin du corps
+    ------------------------------------------------------------
+    */
     if (body_anim[0])
         gfx_drawSprite(sx, sy, body_anim[frame], GHOST_SIZE, GHOST_SIZE);
 
-    // --- 4) Dessin des yeux (sauf frightened & eaten) ---
-	if (!is_frightened && !is_eyes)
-	{
-		int idx = -1;
-		switch (dir)
-		{
-			case Dir::Left:  idx = 0; break;
-			case Dir::Right: idx = 1; break;
-			case Dir::Up:    idx = 2; break;
-			case Dir::Down:  idx = 3; break;
-			default:         idx = 0; break; // fallback gauche
-		}
+    /*
+    ------------------------------------------------------------
+      4) Dessin des yeux
+    ------------------------------------------------------------
+    */
+    if (!is_frightened && !is_eyes)
+    {
+        int idx = 0;
+        switch (dir)
+        {
+            case Dir::Left:  idx = 0; break;
+            case Dir::Right: idx = 1; break;
+            case Dir::Up:    idx = 2; break;
+            case Dir::Down:  idx = 3; break;
+            default:         idx = 0; break;
+        }
 
-		const EyeOffset& off = eyeOffsets[idx];
-		gfx_drawSprite(sx + off.dx, sy + off.dy, eyes, 10, 5);
-	}
-	else if (is_eyes)
-	{
-		// Mode Eaten → yeux seuls, centrés
-		gfx_drawSprite(sx + 3, sy + 4, eyes, 10, 5);
-	}
-
+        const EyeOffset& off = eyeOffsets[idx];
+        gfx_drawSprite(sx + off.dx, sy + off.dy, eyes, 10, 5);
+    }
+    else if (is_eyes)
+    {
+        gfx_drawSprite(sx + 3, sy + 4, eyes, 10, 5);
+    }
 }
-

@@ -4,14 +4,13 @@
 #include "game/config.h"
 #include "core/graphics.h"
 
-// Caméra globale (définie dans game.cpp)
 extern float g_camera_y;
 
-// ---------------------------------------------------------------------
-// Définition du labyrinthe B en ASCII (niveau 1, 20 colonnes)
-// ---------------------------------------------------------------------
-// T = case adjacente à l'entrée du tunnel
-// E = portail (case où l'on arrive après wrap)
+/*
+============================================================
+  ASCII DU LABYRINTHE B (NIVEAU 1)
+============================================================
+*/
 const char* maze_B_ascii[MAZE_HEIGHT] = {
     "####################",
     "#o.........#......o#",
@@ -32,184 +31,187 @@ const char* maze_B_ascii[MAZE_HEIGHT] = {
     "#.#.###.#.#...##.#.#",
     "#.#...#.#.#.#....#.#",
     "#.#.###.#.#.######.#",
-    "TE.......P........ET",   // entrée gauche T->E, entrée droite E->T
+    "TE.......P........ET",
     "####################",
 };
 
-
-// Prépare l'affichage la porte selon son état
+/*
+============================================================
+  setGhostDoor : met à jour TOUTES les tuiles porte
+============================================================
+*/
 void Maze::setGhostDoor(TileType newState)
 {
-    tiles[ghost_door_row][ghost_door_col] = newState;
+    for (int r = 0; r < MAZE_HEIGHT; r++)
+        for (int c = 0; c < MAZE_WIDTH; c++)
+            if (isGhostDoorTile(tiles[r][c]))
+                tiles[r][c] = newState;
 }
 
-
-// ---------------------------------------------------------------------
-// Conversion ASCII -> Maze interne
-// ---------------------------------------------------------------------
+/*
+============================================================
+  ASCII → MAZE
+============================================================
+*/
 void maze_from_ascii(const char* ascii[MAZE_HEIGHT], Maze& maze)
 {
     maze.pellet_count        = 0;
     maze.power_pellet_count  = 0;
-    maze.pac_spawn_row       = 0;
-    maze.pac_spawn_col       = 0;
-    maze.fruit_row           = -1;
-    maze.fruit_col           = -1;
-    maze.ghost_door_row      = -1;
-    maze.ghost_door_col      = -1;
-    maze.ghost_center_row    = -1;
-    maze.ghost_center_col    = -1;
     maze.tunnel_entry_count  = 0;
 
-    int house_sum_row = 0;
-    int house_sum_col = 0;
-    int house_count   = 0;
+    int house_sum_r = 0;
+    int house_sum_c = 0;
+    int house_count = 0;
 
-    for (int row = 0; row < MAZE_HEIGHT; ++row) {
-        const char* line = ascii[row];
-        for (int col = 0; col < MAZE_WIDTH; ++col) {
-            char c = line[col];
+    for (int r = 0; r < MAZE_HEIGHT; r++)
+    {
+        const char* line = ascii[r];
+
+        for (int c = 0; c < MAZE_WIDTH; c++)
+        {
+            char ch = line[c];
             TileType t = TileType::Empty;
 
-            switch (c) {
+            switch (ch)
+            {
                 case '#': t = TileType::Wall; break;
                 case '.': t = TileType::Pellet; maze.pellet_count++; break;
                 case 'o': t = TileType::PowerPellet; maze.power_pellet_count++; break;
-				case 'H':
-					t = TileType::GhostHouse;
 
-					if (house_count < 4) {
-						maze.ghost_spawn_row[house_count] = row;
-						maze.ghost_spawn_col[house_count] = col;
-					}
+                case 'H':
+                    t = TileType::GhostHouse;
+                    house_sum_r += r;
+                    house_sum_c += c;
+                    if (house_count < 4) {
+                        maze.ghost_spawn_row[house_count] = r;
+                        maze.ghost_spawn_col[house_count] = c;
+                    }
+                    house_count++;
+                    break;
 
-					house_sum_row += row;
-					house_sum_col += col;
-					house_count++;
-					break;
                 case 'D':
                     t = TileType::GhostDoorClosed;
-                    maze.ghost_door_row = row;
-                    maze.ghost_door_col = col;
+                    maze.ghost_door_row = r;
+                    maze.ghost_door_col = c;
                     break;
+
                 case 'T':
                     t = TileType::Tunnel;
                     break;
+
                 case 'E':
                     t = TileType::TunnelEntry;
                     if (maze.tunnel_entry_count < 2) {
-                        maze.tunnel_entry_row[maze.tunnel_entry_count] = row;
-                        maze.tunnel_entry_col[maze.tunnel_entry_count] = col;
+                        maze.tunnel_entry_row[maze.tunnel_entry_count] = r;
+                        maze.tunnel_entry_col[maze.tunnel_entry_count] = c;
                         maze.tunnel_entry_count++;
                     }
                     break;
+
                 case 'P':
                     t = TileType::PacSpawn;
-                    maze.pac_spawn_row = row;
-                    maze.pac_spawn_col = col;
+                    maze.pac_spawn_row = r;
+                    maze.pac_spawn_col = c;
                     break;
+
                 case 'F':
                     t = TileType::FruitSpawn;
-                    maze.fruit_row = row;
-                    maze.fruit_col = col;
+                    maze.fruit_row = r;
+                    maze.fruit_col = c;
                     break;
-                case ' ':
-                    t = TileType::Empty;
-                    break;
+
                 default:
                     t = TileType::Empty;
                     break;
             }
 
-            maze.tiles[row][col] = t;
+            maze.tiles[r][c] = t;
         }
     }
 
+    // Centre de la maison fantôme (moyenne des H)
     if (house_count > 0) {
-        maze.ghost_center_row = house_sum_row / house_count;
-        maze.ghost_center_col = house_sum_col / house_count;
+        maze.ghost_center_row = house_sum_r / house_count;
+        maze.ghost_center_col = house_sum_c / house_count;
     }
 }
 
-// ---------------------------------------------------------------------
-// Rendu du Maze
-// ---------------------------------------------------------------------
-void Maze::draw() const {
-    for (int row = 0; row < MAZE_HEIGHT; ++row) {
-        for (int col = 0; col < MAZE_WIDTH; ++col) {
+/*
+============================================================
+  RENDU DU LABYRINTHE
+============================================================
+*/
+void Maze::draw() const
+{
+    for (int r = 0; r < MAZE_HEIGHT; r++)
+    {
+        for (int c = 0; c < MAZE_WIDTH; c++)
+        {
+            TileType t = tiles[r][c];
 
-            TileType t = tiles[row][col];
-            int px = col * TILE_SIZE;
-            int py = row * TILE_SIZE;
+            int px = c * TILE_SIZE;
+            int py = r * TILE_SIZE;
 
-            int screen_x = px;
-            int screen_y = py - (int)g_camera_y;
+            int sx = px;
+            int sy = py - (int)g_camera_y;
 
-            if (screen_y < -TILE_SIZE || screen_y >= SCREEN_H)
+            if (sy < -TILE_SIZE || sy >= SCREEN_H)
                 continue;
 
-            switch (t) {
-
+            switch (t)
+            {
                 case TileType::Wall:
-                    draw_sprite16(screen_x, screen_y, tile_wall);
+                    draw_sprite16(sx, sy, tile_wall);
                     break;
 
                 case TileType::Pellet:
-                    draw_sprite16(screen_x, screen_y, tile_pacgum);
+                    draw_sprite16(sx, sy, tile_pacgum);
                     break;
 
                 case TileType::PowerPellet:
-                    draw_sprite16(screen_x, screen_y, tile_powerdot);
+                    draw_sprite16(sx, sy, tile_powerdot);
                     break;
 
                 case TileType::Tunnel:
-                    // mur spécial avec ouverture
-                    draw_sprite16(screen_x, screen_y, tile_tunnel_wall);
+                    draw_sprite16(sx, sy, tile_tunnel_wall);
                     break;
 
-                case TileType::TunnelEntry: {
-                    // Détection automatique de la direction du tunnel
-                    bool left  = (col > 0              && tiles[row][col-1] == TileType::Tunnel);
-                    bool right = (col < MAZE_WIDTH-1   && tiles[row][col+1] == TileType::Tunnel);
-                    bool up    = (row > 0              && tiles[row-1][col] == TileType::Tunnel);
-                    bool down  = (row < MAZE_HEIGHT-1  && tiles[row+1][col] == TileType::Tunnel);
+                case TileType::TunnelEntry:
+                {
+                    // Détection directionnelle robuste
+                    bool left  = (c > 0              && tiles[r][c-1] == TileType::Tunnel);
+                    bool right = (c < MAZE_WIDTH-1   && tiles[r][c+1] == TileType::Tunnel);
+                    bool up    = (r > 0              && tiles[r-1][c] == TileType::Tunnel);
+                    bool down  = (r < MAZE_HEIGHT-1  && tiles[r+1][c] == TileType::Tunnel);
 
-                    if (left)
-                        draw_sprite16(screen_x, screen_y, tile_tunnel_entry_left);
-                    else if (right)
-                        draw_sprite16(screen_x, screen_y, tile_tunnel_entry_right);
-                    else if (up)
-                        draw_sprite16(screen_x, screen_y, tile_tunnel_entry_up);
-                    else if (down)
-                        draw_sprite16(screen_x, screen_y, tile_tunnel_entry_down);
-                    else
-                        draw_sprite16(screen_x, screen_y, tile_tunnel_entry_neutral);
-
+                    if (left)       draw_sprite16(sx, sy, tile_tunnel_entry_left);
+                    else if (right) draw_sprite16(sx, sy, tile_tunnel_entry_right);
+                    else if (up)    draw_sprite16(sx, sy, tile_tunnel_entry_up);
+                    else if (down)  draw_sprite16(sx, sy, tile_tunnel_entry_down);
+                    else            draw_sprite16(sx, sy, tile_tunnel_entry_neutral);
                     break;
                 }
 
-                case TileType::GhostHouse:
-                    // plus tard : couleur spéciale
+                case TileType::GhostDoorClosed:
+                    draw_sprite16(sx, sy, tile_ghost_door_closed);
                     break;
 
-				
-				case TileType::GhostDoorClosed:
-					draw_sprite16(screen_x, screen_y, tile_ghost_door_closed);
-					break;
+                case TileType::GhostDoorOpening:
+                    draw_sprite16(sx, sy, tile_ghost_door_opening);
+                    break;
 
-				case TileType::GhostDoorOpening:
-					draw_sprite16(screen_x, screen_y, tile_ghost_door_opening);
-					break;
+                case TileType::GhostDoorOpen:
+                    draw_sprite16(sx, sy, tile_ghost_door_open);
+                    break;
 
-				case TileType::GhostDoorOpen:
-					draw_sprite16(screen_x, screen_y, tile_ghost_door_open);
-					break;
-	
-
+/*                case TileType::GhostHouse:
+                    // Optionnel : motif discret
+                    draw_sprite16(sx, sy, tile_ghost_house);
+                    break;
+*/
                 default:
                     break;
             }
         }
     }
 }
-
